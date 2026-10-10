@@ -1,0 +1,7 @@
+{
+  "name": "controle-financeiro",
+  "productName": "Controle Financeiro",
+  "version": "1.6.3",
+  "main": "main.cjs",
+  "private": true
+}

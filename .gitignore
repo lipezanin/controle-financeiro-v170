@@ -1,0 +1,41 @@
+# dependências e builds
+node_modules/
+.output/
+.vercel/
+dist/
+.nitro/
+.cache/
+*.local
+
+# ambiente (não versionar segredos)
+.env
+.env.*
+!.env.example
+
+# instalador / binários enormes
+artifacts/
+public/downloads/
+*.exe
+*.zip
+!src/**/*.zip
+
+# SQLite / dados locais
+*.db
+*.sqlite
+*.sqlite3
+
+# SO / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# planilha e dados pessoais
+attachments/
+.grok/
+.tanstack/
+
+# log
+*.log
+npm-debug.log*

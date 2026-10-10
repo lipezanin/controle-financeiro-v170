@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-surface-2: #243044;
+  --color-fg: #f1f5f9;
+  --color-muted: #94a3b8;
+  --color-subtle: #64748b;
+  --color-border: #334155;
+  --color-accent: #3b82f6;
+  --color-accent-fg: #eff6ff;
+  --color-input: #1e3a5f;
+  --color-input-border: #3b82f6;
+  --color-gain: #22c55e;
+  --color-loss: #ef4444;
+  --color-warn: #eab308;
+
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  --shadow-card: 0 8px 24px rgb(2 6 23 / 0.35);
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  * {
+    border-color: var(--color-border);
+    box-sizing: border-box;
+  }
+
+  input,
+  select,
+  textarea {
+    background: var(--color-input);
+    color: var(--color-fg);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+    border-radius: 8px;
+    padding: 6px 10px;
+  }
+
+  input[type="file"] {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.zebra tbody tr:nth-child(even) {
+  background: rgb(255 255 255 / 0.02);
+}
+
+/* Layout que NÃO depende do Tailwind — evita tela “nua” se o CSS hashed falhar no Electron */
+.cf-shell {
+  min-height: 100dvh;
+  background: #0f172a;
+  color: #f1f5f9;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+.cf-aside {
+  display: none;
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 30;
+  width: 280px;
+  flex-direction: column;
+  border-right: 1px solid #334155;
+  background: #0f172a;
+  padding: 16px 12px;
+  overflow: auto;
+}
+.cf-mobile-header {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #334155;
+  background: rgb(15 23 42 / 0.9);
+  padding: 12px;
+}
+.cf-main {
+  padding: 24px 16px;
+}
+.cf-badge {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: #3b82f6;
+  color: #eff6ff;
+  font-size: 12px;
+  font-weight: 600;
+}
+@media (min-width: 768px) {
+  .cf-aside {
+    display: flex !important;
+  }
+  .cf-mobile-header {
+    display: none !important;
+  }
+  .cf-main {
+    padding-left: 304px;
+  }
+}
