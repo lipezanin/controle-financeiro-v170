@@ -17,6 +17,11 @@ export function FormRfInternacional({ onOk }: { onOk?: () => void }) {
   const [iof, setIof] = useState("");
   const [spread, setSpread] = useState("");
   const [instituicao, setInstituicao] = useState("");
+  const [tipoRf, setTipoRf] = useState("Bonds");
+  const [indexador, setIndexador] = useState("");
+  const [liquidez, setLiquidez] = useState("No Vencimento");
+  const [amortizacao, setAmortizacao] = useState("No Vencimento");
+  const [taxa, setTaxa] = useState("");
 
   const fx = parseNumeroBR(usd) > 0 && parseNumeroBR(brl) > 0 ? parseNumeroBR(brl) / parseNumeroBR(usd) : 0;
 
@@ -31,18 +36,18 @@ export function FormRfInternacional({ onOk }: { onOk?: () => void }) {
         data: String(fd.get("data")),
         nome: String(fd.get("nome")),
         ticker: String(fd.get("ticker")),
-        tipoRf: String(fd.get("tipoRf")),
+        tipoRf,
         emissor: String(fd.get("emissor")),
         instituicao,
-        indexador: String(fd.get("indexador")),
-        taxa: String(fd.get("taxa")),
+        indexador,
+        taxa,
         valorUsd: usd,
         valorInvestidoBrl: brl,
         iofBrl: iof,
         spreadBrl: spread,
         vencimento: String(fd.get("vencimento")),
-        liquidez: String(fd.get("liquidez")),
-        amortizacao: String(fd.get("amortizacao")),
+        liquidez,
+        amortizacao,
       });
       setMsg("Aplicação internacional lançada.");
       onOk?.();
@@ -71,10 +76,12 @@ export function FormRfInternacional({ onOk }: { onOk?: () => void }) {
         </label>
         <label className="text-xs text-muted">
           Tipo
-          <select className={campo} name="tipoRf" defaultValue="Bonds">
-            <option>Bonds</option>
-            <option>Treasuries</option>
-          </select>
+          <SelectCadastro
+            sessao="categoria_investimento"
+            value={tipoRf}
+            onChange={setTipoRf}
+            className={campo}
+          />
         </label>
         <label className="text-xs text-muted">
           Emissor
@@ -86,11 +93,11 @@ export function FormRfInternacional({ onOk }: { onOk?: () => void }) {
         </label>
         <label className="text-xs text-muted">
           Indexador
-          <input className={campo} name="indexador" placeholder="UST / FED / Pré" />
+          <SelectCadastro sessao="indexador" value={indexador} onChange={setIndexador} className={campo} />
         </label>
         <label className="text-xs text-muted">
-          Taxa (ex.: 0,0425)
-          <input className={campo} name="taxa" />
+          Taxa (ex.: 4,25 ou 104,50)
+          <CampoValor modo="qtd" casas={4} value={taxa} onChange={setTaxa} />
         </label>
         <label className="text-xs text-muted">
           Vencimento
@@ -118,11 +125,11 @@ export function FormRfInternacional({ onOk }: { onOk?: () => void }) {
         </label>
         <label className="text-xs text-muted">
           Liquidez
-          <input className={campo} name="liquidez" defaultValue="No Vencimento" />
+          <SelectCadastro sessao="liquidez" value={liquidez} onChange={setLiquidez} className={campo} />
         </label>
         <label className="text-xs text-muted">
           Amortização
-          <input className={campo} name="amortizacao" defaultValue="No Vencimento" />
+          <SelectCadastro sessao="amortizacao" value={amortizacao} onChange={setAmortizacao} className={campo} />
         </label>
       </div>
       {erro ? <p className="text-sm text-loss">{erro}</p> : null}

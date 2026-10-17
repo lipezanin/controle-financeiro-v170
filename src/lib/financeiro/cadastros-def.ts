@@ -129,6 +129,14 @@ export const SESSOES_CADASTRO: SessaoCadastro[] = [
     descricao: "Indexadores de renda fixa (CDI, IPCA+, Prefixado…).",
     usadoEm: "Renda fixa",
   },
+  {
+    id: "amortizacao",
+    tabela: "cad_amortizacao",
+    rotulo: "Amortização",
+    secao: "Investimentos",
+    descricao: "Periodicidade do pagamento dos juros do título.",
+    usadoEm: "Renda fixa nacional e internacional",
+  },
 ];
 
 export const SEMENTES_CADASTRO: Record<string, string[]> = {
@@ -162,6 +170,7 @@ export const SEMENTES_CADASTRO: Record<string, string[]> = {
     "CDI+",
     "Selic+",
   ],
+  amortizacao: ["Mensal", "Trimestral", "Semestral", "Anual", "No Vencimento"],
   categoria_despesa: [
     "Alimentação",
     "Assinaturas",

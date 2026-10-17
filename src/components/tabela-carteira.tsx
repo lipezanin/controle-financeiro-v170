@@ -15,7 +15,8 @@ type Campo =
   | "mercado"
   | "yoc"
   | "dy"
-  | "renta";
+  | "renta"
+  | "rentaPct";
 
 function valor(p: Posicao, c: Campo): unknown {
   if (c === "ticker") return p.ticker;
@@ -28,6 +29,7 @@ function valor(p: Posicao, c: Campo): unknown {
   if (c === "mercado") return p.valorMercado ?? p.valorInvestido;
   if (c === "yoc") return p.yieldOnCost;
   if (c === "dy") return p.dividendYield;
+  if (c === "rentaPct") return p.valorInvestido > 0 ? p.lucroProventos / p.valorInvestido : null;
   return p.lucroProventos;
 }
 
@@ -42,6 +44,7 @@ export function TabelaCarteira({
 }) {
   const [campo, setCampo] = useState<Campo | null>(null);
   const [dir, setDir] = useState<DirSort>("asc");
+  const [aberto, setAberto] = useState(false);
   const ordenadas = useMemo(() => {
     if (!campo) return posicoes;
     return [...posicoes].sort((a, b) => compararSort(valor(a, campo), valor(b, campo), dir));
@@ -57,11 +60,20 @@ export function TabelaCarteira({
   }
 
   return (
-    <section className="mb-6">
-      <h3 className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        ▸ {grupo}
-      </h3>
-      <div className="overflow-x-auto rounded-lg border border-border">
+    <section className="mb-3">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-left"
+        onClick={() => setAberto((v) => !v)}
+        aria-expanded={aberto}
+      >
+        <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
+          {aberto ? "▾" : "▸"} {grupo}
+        </span>
+        <span className="text-xs text-subtle">{posicoes.length} ativos</span>
+      </button>
+      {aberto ? (
+      <div className="mt-2 overflow-x-auto rounded-lg border border-border">
         <table className="zebra min-w-[1100px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
@@ -75,12 +87,13 @@ export function TabelaCarteira({
               <ThSort label="YoC" campo="yoc" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="DY atual" campo="dy" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Renta" campo="renta" atual={campo} dir={dir} onClick={clicar} align="right" />
+              <ThSort label="Renta %" campo="rentaPct" atual={campo} dir={dir} onClick={clicar} align="right" />
             </tr>
           </thead>
           <tbody>
             {ordenadas.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-3 py-3 text-subtle">
+                <td colSpan={11} className="px-3 py-3 text-subtle">
                   (sem posições)
                 </td>
               </tr>
@@ -114,12 +127,21 @@ export function TabelaCarteira({
                     {formatPct(p.dividendYield, 2)}
                   </td>
                   <td className="px-3 py-2 text-right font-mono tabular">{formatBRL(p.lucroProventos)}</td>
+                  <td
+                    className={cn(
+                      "px-3 py-2 text-right font-mono tabular",
+                      p.lucroProventos >= 0 ? "text-gain" : "text-loss",
+                    )}
+                  >
+                    {formatPct(p.valorInvestido > 0 ? p.lucroProventos / p.valorInvestido : null, 2)}
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+      ) : null}
     </section>
   );
 }

@@ -8,7 +8,6 @@ import { dolarNaData } from "@/services/cambio-service";
 import { lancarNotaInternacional } from "@/services/lancamento-service";
 
 const MAX = 20;
-const CATS = ["Stocks", "ETF USA", "Reits"];
 const campo =
   "h-9 w-full rounded-md border border-input-border bg-input px-2 text-[12px] text-fg";
 
@@ -21,8 +20,11 @@ type Linha = {
 };
 
 export function NotaInternacional({ onOk }: { onOk?: () => void }) {
-  const listas = useCadastros(["instituicao", "tipo_movimentacao", "liquidez"]);
+  const listas = useCadastros(["instituicao", "tipo_movimentacao", "liquidez", "categoria_investimento"]);
   const tipos = listas.tipo_movimentacao?.length ? listas.tipo_movimentacao : ["Compra", "Venda"];
+  const cats = listas.categoria_investimento?.length
+    ? listas.categoria_investimento
+    : ["Stocks", "ETF USA", "Reits", "Bonds", "Treasuries"];
   const vazia = (): Linha => ({
     tipo: "Compra",
     categoria: "Stocks",
@@ -191,7 +193,7 @@ export function NotaInternacional({ onOk }: { onOk?: () => void }) {
                       setLinhas((p) => p.map((x, idx) => (idx === i ? { ...x, categoria: e.target.value } : x)))
                     }
                   >
-                    {CATS.map((c) => (
+                    {cats.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
                   </select>

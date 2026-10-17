@@ -26,6 +26,7 @@ export type ResultadoImportacao = {
 };
 
 const SEED = JSON.parse(seedRaw) as LoteImportacao;
+export const SEED_VERSAO = "2.1-3";
 
 const COLUNAS_TX = [
   "nota",
@@ -59,6 +60,13 @@ const COLUNAS_TX = [
   "ganho_cambial",
   "observacao",
 ] as const;
+
+/** Parcelas do mesmo apartamento voltam a um único ativo. */
+function tickerCanonico(ticker: unknown): unknown {
+  const t = String(ticker ?? "").trim();
+  if (/^Apto 901 - Ed Urbe \d+$/i.test(t)) return "Apto 901 - Ed Urbe";
+  return ticker;
+}
 
 function val(v: unknown): string | number | null {
   if (v == null || v === "") return null;
@@ -257,19 +265,25 @@ function aplicarLote(db: Database, lote: LoteImportacao): ResultadoImportacao {
   }
 }
 
-/** Importa o seed da planilha 2.1 (primeira carga ou recarga). */
+/** Importa o seed da planilha 2.1-2 (primeira carga ou nova versão). */
 export async function importarSeed(): Promise<ResultadoImportacao> {
   const db = await getDb();
   const r = aplicarLote(db, SEED);
+  executar(db, `INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('seed_versao', ?)`, [
+    SEED_VERSAO,
+  ]);
   await salvarDb();
   return r;
 }
 
-/** Se o banco ainda não tem lançamentos, carrega o seed automaticamente. */
+/** Recarrega o seed quando o banco está vazio ou ainda está numa planilha anterior. */
 export async function garantirImportacaoInicial(): Promise<boolean> {
   const db = await getDb();
   const n = Number(consultar(db, "SELECT COUNT(*) AS v FROM transacoes")[0]?.v ?? 0);
-  if (n > 0) return false;
+  const ver = String(
+    consultar(db, "SELECT valor AS v FROM configuracoes WHERE chave = 'seed_versao'")[0]?.v ?? "",
+  );
+  if (n > 0 && ver === SEED_VERSAO) return false;
   await importarSeed();
   return true;
 }
@@ -307,7 +321,7 @@ let xlsxMod: typeof import("xlsx") | null = null;
 function linhasAba(
   wb: import("xlsx").WorkBook,
   nome: string,
-  headerRow1: number,
+  marca: string,
 ): Record<string, unknown>[] {
   const xlsx = xlsxMod;
   if (!xlsx) throw new Error("xlsx não carregado");
@@ -319,9 +333,13 @@ function linhasAba(
     defval: null,
     blankrows: false,
   }) as unknown[][];
-  const headers = (rows[headerRow1 - 1] ?? []).map((h) => String(h ?? "").trim());
+  const headerIdx = rows.findIndex(
+    (row, i) => i < 15 && (row ?? []).some((c) => String(c ?? "").trim() === marca),
+  );
+  if (headerIdx < 0) return [];
+  const headers = (rows[headerIdx] ?? []).map((h) => String(h ?? "").trim());
   const out: Record<string, unknown>[] = [];
-  for (let i = headerRow1; i < rows.length; i++) {
+  for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i] ?? [];
     const rec: Record<string, unknown> = {};
     let vazio = true;
@@ -340,12 +358,12 @@ export async function importarPlanilha(arquivo: File): Promise<ResultadoImportac
   const buf = await arquivo.arrayBuffer();
   const wb = xlsxMod.read(buf, { type: "array", cellDates: true });
 
-  const transacoes = linhasAba(wb, "TRANSAÇÕES", 3).map((r) => ({
+  const transacoes = linhasAba(wb, "TRANSAÇÕES", "Ativo / Ticker").map((r) => ({
     nota: cab(r, "Nota"),
     data: isoData(cab(r, "Data")),
     tipo_operacao: cab(r, "Tipo de Operação *", "Tipo de Operação"),
     categoria: cab(r, "Categoria Investimento"),
-    ticker: cab(r, "Ativo / Ticker"),
+    ticker: tickerCanonico(cab(r, "Ativo / Ticker")),
     liquidez: cab(r, "Liquidez"),
     emissor: cab(r, "Emissor"),
     instituicao: cab(r, "Instituição (Custódia)"),
@@ -373,7 +391,7 @@ export async function importarPlanilha(arquivo: File): Promise<ResultadoImportac
     observacao: cab(r, "Observação"),
   }));
 
-  const renda_fixa = linhasAba(wb, "RENDA FIXA", 5).map((r) => ({
+  const renda_fixa = linhasAba(wb, "RENDA FIXA", "Nome do Ativo").map((r) => ({
     nome: cab(r, "Nome do Ativo"),
     ticker: cab(r, "Ticker"),
     tipo_movimento: cab(r, "Tipo de Movimento"),
@@ -399,7 +417,7 @@ export async function importarPlanilha(arquivo: File): Promise<ResultadoImportac
     lancado_rendimentos: 0,
   }));
 
-  const rendimentos = linhasAba(wb, "RENDIMENTOS", 3).map((r) => ({
+  const rendimentos = linhasAba(wb, "RENDIMENTOS", "Tipo de Rendimento").map((r) => ({
     data: isoData(cab(r, "Data")),
     tipo: cab(r, "Tipo de Rendimento"),
     origem: cab(r, "Origem"),
@@ -420,7 +438,7 @@ export async function importarPlanilha(arquivo: File): Promise<ResultadoImportac
     observacao: cab(r, "Observação"),
   }));
 
-  const despesas = linhasAba(wb, "CONTAS A PAGAR", 3).map((r) => ({
+  const despesas = linhasAba(wb, "CONTAS A PAGAR", "Data Vencimento").map((r) => ({
     data_vencimento: isoData(cab(r, "Data Vencimento")),
     categoria: cab(r, "Categoria"),
     descricao: cab(r, "Descrição"),
@@ -431,7 +449,7 @@ export async function importarPlanilha(arquivo: File): Promise<ResultadoImportac
     observacao: cab(r, "Observação"),
   }));
 
-  const caixa_fisico = linhasAba(wb, "CAIXA FÍSICO", 5).map((r) => {
+  const caixa_fisico = linhasAba(wb, "CAIXA FÍSICO", "Tipo de Movimentação").map((r) => {
     let tipo = String(cab(r, "Tipo de Movimentação") ?? "");
     if (tipo === "Deposito") tipo = "Depósito";
     return {

@@ -7,8 +7,6 @@ import { formatNumeroBR, parseNumeroBR } from "@/utils/numeros-br";
 
 const campo = "h-11 w-full rounded-md border border-input-border bg-input px-3 text-sm text-fg";
 
-const CATS = ["Stocks", "ETF USA", "Reits", "Bonds", "Treasuries"];
-
 /** Compra/venda avulsa no exterior. Custo em BRL = conversão + IOF + spread. */
 export function FormTxInternacional({ onOk }: { onOk?: () => void }) {
   const [usd, setUsd] = useState("");
@@ -17,6 +15,8 @@ export function FormTxInternacional({ onOk }: { onOk?: () => void }) {
   const [spread, setSpread] = useState("");
   const [qtd, setQtd] = useState("");
   const [inst, setInst] = useState("");
+  const [tipo, setTipo] = useState("Compra");
+  const [categoria, setCategoria] = useState("Stocks");
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -36,8 +36,8 @@ export function FormTxInternacional({ onOk }: { onOk?: () => void }) {
       const sprN = parseNumeroBR(spread);
       await lancarTransacao({
         data: String(fd.get("data")),
-        tipo: String(fd.get("tipo") || "Compra"),
-        categoria: String(fd.get("categoria") || "Stocks"),
+        tipo,
+        categoria,
         ticker: String(fd.get("ticker")),
         quantidade: qtd,
         valorBrl: brlN + iofN + sprN,
@@ -78,18 +78,11 @@ export function FormTxInternacional({ onOk }: { onOk?: () => void }) {
         </label>
         <label className="text-xs text-muted">
           Tipo
-          <select className={campo} name="tipo" defaultValue="Compra">
-            <option>Compra</option>
-            <option>Venda</option>
-          </select>
+          <SelectCadastro sessao="tipo_movimentacao" value={tipo} onChange={setTipo} className={campo} />
         </label>
         <label className="text-xs text-muted">
           Categoria
-          <select className={campo} name="categoria" defaultValue="Stocks">
-            {CATS.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
+          <SelectCadastro sessao="categoria_investimento" value={categoria} onChange={setCategoria} className={campo} />
         </label>
         <label className="text-xs text-muted">
           Ticker

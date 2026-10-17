@@ -158,14 +158,16 @@ function montarPosicao(args: {
   quantidade: number;
   precoMedio: number | null;
   valorInvestido: number;
+  custoAportado?: number;
   proventos: Map<string, number>;
   operacoes: Map<string, number>;
   vendas: Map<string, number>;
 }): Posicao {
   const key = args.ticker.toUpperCase();
   const proventosLiq = args.proventos.get(key) ?? 0;
-  const yoc =
-    args.valorInvestido > EPS ? proventosLiq / args.valorInvestido : null;
+  const baseYoc =
+    args.valorInvestido > EPS ? args.valorInvestido : (args.custoAportado ?? 0);
+  const yoc = baseYoc > EPS ? proventosLiq / baseYoc : null;
   return {
     chave: args.chave,
     ticker: args.ticker,
@@ -214,40 +216,86 @@ function posicoesDoLivro(
 ): Posicao[] {
   const linhas = consultar(
     db,
-    `SELECT t.ticker AS ticker,
-            t.categoria AS categoria,
-            t.emissor AS emissor,
-            t.liquidez AS liquidez,
-            t.qtd_acumulada AS qtd,
-            t.quantidade AS qtd_linha,
-            t.preco_medio_brl AS pm,
-            t.custo_acum_brl AS custo
-     FROM transacoes t
-     INNER JOIN (
-       SELECT ticker, categoria, MAX(id) AS id
-       FROM transacoes
-       WHERE ticker IS NOT NULL
-       GROUP BY ticker, categoria
-     ) u ON u.id = t.id`,
+    `SELECT ticker, categoria, tipo_operacao AS tipo, emissor, liquidez,
+            quantidade, valor_brl AS valor, qtd_acumulada AS qtd_acum, custo_acum_brl AS custo_acum
+     FROM transacoes
+     WHERE ticker IS NOT NULL AND TRIM(ticker) <> ''
+     ORDER BY data, id`,
   );
-  return linhas
-    .filter((r) => str(r.ticker))
-    .filter((r) => grupoDe(String(r.categoria ?? "")) !== "Renda Fixa")
-    .map((r) =>
-      montarPosicao({
-        chave: `tx:${r.categoria}:${r.ticker}`,
-        ticker: String(r.ticker),
-        categoria: String(r.categoria ?? ""),
-        emissor: str(r.emissor),
-        liquidez: str(r.liquidez),
-        quantidade: num(r.qtd) || num(r.qtd_linha),
-        precoMedio: r.pm == null ? null : num(r.pm),
-        valorInvestido: num(r.custo),
-        proventos,
-        operacoes,
-        vendas,
-      }),
-    );
+  type Acc = {
+    ticker: string;
+    categoria: string;
+    emissor: string;
+    liquidez: string;
+    qtd: number;
+    custo: number;
+    aportes: number;
+    snapQtd: number;
+    snapCusto: number;
+    movimentos: number;
+  };
+  const mapa = new Map<string, Acc>();
+  for (const r of linhas) {
+    const categoria = String(r.categoria ?? "");
+    if (grupoDe(categoria) === "Renda Fixa") continue;
+    const ticker = String(r.ticker);
+    const key = `${categoria}|${ticker.toUpperCase()}`;
+    let a = mapa.get(key);
+    if (!a) {
+      a = {
+        ticker,
+        categoria,
+        emissor: "",
+        liquidez: "",
+        qtd: 0,
+        custo: 0,
+        aportes: 0,
+        snapQtd: 0,
+        snapCusto: 0,
+        movimentos: 0,
+      };
+      mapa.set(key, a);
+    }
+    if (str(r.emissor)) a.emissor = String(r.emissor);
+    if (str(r.liquidez)) a.liquidez = String(r.liquidez);
+    const tipo = str(r.tipo);
+    const qtd = Math.abs(num(r.quantidade));
+    const valor = Math.abs(num(r.valor));
+    const compra = tipo === "Compra" || tipo === "Parcela Imóvel" || tipo === "ITBI / Cartório";
+    if (compra || tipo === "Venda") a.movimentos += 1;
+    if (compra) {
+      a.qtd += qtd;
+      a.custo += valor;
+      a.aportes += valor;
+    } else if (tipo === "Venda" && a.qtd > EPS) {
+      const sai = Math.min(qtd > EPS ? qtd : a.qtd, a.qtd);
+      a.custo *= (a.qtd - sai) / a.qtd;
+      a.qtd -= sai;
+    }
+    if (r.qtd_acum != null && r.qtd_acum !== "") {
+      a.snapQtd = num(r.qtd_acum);
+      a.snapCusto = num(r.custo_acum);
+    }
+  }
+  return [...mapa.values()].map((a) => {
+    const fechou = a.movimentos > 0 && a.qtd <= EPS;
+    const qtd = fechou ? 0 : a.qtd > EPS ? a.qtd : a.snapQtd;
+    const custo = qtd > EPS ? (a.qtd > EPS ? a.custo : a.snapCusto) : 0;
+    return montarPosicao({
+      chave: `tx:${a.categoria}:${a.ticker}`,
+      ticker: a.ticker,
+      categoria: a.categoria,
+      emissor: a.emissor,
+      liquidez: a.liquidez,
+      quantidade: qtd,
+      precoMedio: qtd > EPS ? custo / qtd : null,
+      valorInvestido: custo,
+      custoAportado: a.aportes,
+      proventos,
+      operacoes,
+      vendas,
+    });
+  });
 }
 
 function posicoesRf(
@@ -273,7 +321,8 @@ function posicoesRf(
       liquidez: str(r.liquidez),
       quantidade: resgatado ? 0 : 1,
       precoMedio: num(r.valor_aplicado),
-      valorInvestido: num(r.valor_aplicado),
+      valorInvestido: resgatado ? 0 : num(r.valor_aplicado),
+      custoAportado: num(r.valor_aplicado),
       proventos,
       operacoes,
       vendas,

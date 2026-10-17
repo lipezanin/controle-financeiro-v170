@@ -50,6 +50,7 @@ export async function evolucaoPatrimonio(periodo?: Periodo): Promise<PontoEvoluc
      SELECT substr(data_aplicacao,1,7) AS mes, SUM(valor_aplicado) AS v
      FROM renda_fixa
      WHERE tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0
+       AND COALESCE(status, 'Ativo') <> 'Resgatado'
      GROUP BY mes`,
   );
   const porMes = new Map<string, number>();

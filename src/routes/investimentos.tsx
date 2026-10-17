@@ -10,7 +10,7 @@ import { formatBRL, formatData, formatPct, formatQtd } from "@/lib/financeiro/fo
 import { cn } from "@/lib/utils";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useRecorteMercado } from "@/hooks/mercado-context";
-import { passaRecorte, classeNoRecorte } from "@/lib/financeiro/mercado";
+import { passaRecorte } from "@/lib/financeiro/mercado";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { dataNoPeriodo } from "@/lib/financeiro/periodo";
 import {
@@ -46,17 +46,20 @@ function Pagina() {
     setAba(abaUrl);
   }, [abaUrl]);
 
-  useEffect(() => {
+  const recarregarLista = useCallback(() => {
     void listarCarteira()
       .then((c) => {
         setCarteira(c);
         setErroLista(null);
       })
       .catch((e: unknown) => {
-        setCarteira(null);
         setErroLista(e instanceof Error ? e.message : "Falha ao ler a carteira");
       });
   }, []);
+
+  useEffect(() => {
+    recarregarLista();
+  }, [recarregarLista]);
 
   const atualizar = useCallback(async (t: string) => {
     setTicker(t);
@@ -73,9 +76,9 @@ function Pagina() {
   }, [atualizar]);
 
   const recarregarMercado = useCallback(() => {
-    void listarCarteira().then(setCarteira);
+    recarregarLista();
     void atualizar(ticker);
-  }, [atualizar, ticker]);
+  }, [atualizar, recarregarLista, ticker]);
 
   useMercadoAtualizado(recarregarMercado);
 
@@ -89,6 +92,21 @@ function Pagina() {
     () => grupos?.reduce((s, g) => s + g.posicoes.length, 0) ?? 0,
     [grupos],
   );
+  const bolsa = (grupos ?? []).filter((g) => g.grupo !== "Imóveis");
+  const imoveis = (grupos ?? []).filter((g) => g.grupo === "Imóveis");
+  const totBolsa = bolsa.reduce(
+    (s, g) => {
+      for (const p of g.posicoes) {
+        s.custo += p.valorInvestido;
+        s.mercado += p.valorMercado ?? p.valorInvestido;
+        s.proventos += p.proventosLiq;
+      }
+      return s;
+    },
+    { custo: 0, mercado: 0, proventos: 0 },
+  );
+  const totImoveis = imoveis.reduce((s, g) => s + g.posicoes.reduce((a, p) => a + p.valorInvestido, 0), 0);
+  const rentBolsa = totBolsa.custo ? (totBolsa.mercado - totBolsa.custo + totBolsa.proventos) / totBolsa.custo : null;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -147,7 +165,7 @@ function Pagina() {
             <KpiCard
               label="Dividend yield atual (mercado)"
               value={formatPct(consulta.dividendYield, 2)}
-              hint="Yahoo Finance / cotação pública"
+              hint="Dividendos pagos em 12 meses ÷ cotação (Yahoo)"
             />
             <KpiCard label="Proventos acumulados (líq.)" value={formatBRL(consulta.proventosLiq)} />
             <KpiCard label="Lucro + proventos" value={formatBRL(consulta.lucroProventos)} />
@@ -251,19 +269,35 @@ function Pagina() {
       ) : null}
 
       <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        Posição por categoria
+        Sessão 1 — Bolsa de valores
       </p>
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard label="Custo em bolsa" value={formatBRL(totBolsa.custo)} />
+        <KpiCard label="Mercado" value={formatBRL(totBolsa.mercado)} />
+        <KpiCard label="Proventos" value={formatBRL(totBolsa.proventos)} />
+        <KpiCard label="Rentabilidade (mercado + proventos)" value={formatPct(rentBolsa, 2)} />
+      </div>
       <div className="mb-8">
         <CardsClasse
-          dados={(carteira?.variacaoGrupos ?? [])
-            .filter((g) => classeNoRecorte(recorte, g.grupo))
-            .map((g) => ({
+          dados={bolsa.map((g) => {
+            const valor = g.posicoes.reduce((s, p) => s + (p.valorMercado ?? p.valorInvestido), 0);
+            const card = (carteira?.variacaoGrupos ?? []).find((v) => v.grupo === g.grupo);
+            return {
               classe: g.grupo,
-              valor: g.valor,
-              variacaoPct: g.variacaoPct,
-              variacaoReais: g.variacaoReais,
-            }))}
+              valor,
+              variacaoPct: card?.variacaoPct,
+              variacaoReais: card?.variacaoReais,
+            };
+          })}
         />
+      </div>
+
+      <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
+        Sessão 2 — Imóveis
+      </p>
+      <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <KpiCard label="Custo dos imóveis" value={formatBRL(totImoveis)} hint="A rentabilidade real só aparece na venda." />
+        <KpiCard label="Imóveis na carteira" value={String(imoveis.reduce((s, g) => s + g.posicoes.length, 0))} />
       </div>
 
       <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
@@ -290,7 +324,20 @@ function Pagina() {
         <span className="self-center text-xs text-subtle">{nPos} posições</span>
       </div>
 
-      {(grupos ?? []).map((g) => (
+      <p className="mb-3 mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Bolsa</p>
+      {bolsa.map((g) => (
+        <TabelaCarteira
+          key={g.grupo}
+          grupo={g.grupo}
+          posicoes={g.posicoes}
+          onTicker={(t) => {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            void atualizar(t);
+          }}
+        />
+      ))}
+      <p className="mb-3 mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Imóveis</p>
+      {imoveis.map((g) => (
         <TabelaCarteira
           key={g.grupo}
           grupo={g.grupo}

@@ -10,6 +10,7 @@ import { useRecorteMercado } from "@/hooks/mercado-context";
 import { classeNoRecorte } from "@/lib/financeiro/mercado";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { evolucaoPatrimonio, type PontoEvolucao } from "@/services/evolucao-patrimonio-service";
+import { listarCarteira, type Carteira } from "@/services/investimento-service";
 import { resumirPatrimonio, type ResumoPatrimonio } from "@/services/patrimonio-service";
 import { resumirRentabilidade, type Rentabilidade } from "@/services/rentabilidade-service";
 
@@ -26,6 +27,7 @@ function Pagina() {
   const [r, setR] = useState<ResumoPatrimonio | null>(null);
   const [rent, setRent] = useState<Rentabilidade | null>(null);
   const [evo, setEvo] = useState<PontoEvolucao[]>([]);
+  const [carteira, setCarteira] = useState<Carteira | null>(null);
   const [grupo, setGrupo] = useState("");
   const [erro, setErro] = useState<string | null>(null);
 
@@ -38,11 +40,13 @@ function Pagina() {
         recorte,
       }),
       evolucaoPatrimonio(periodoGlobal),
+      listarCarteira(),
     ])
-      .then(([p, rt, ev]) => {
+      .then(([p, rt, ev, cart]) => {
         setR(p);
         setRent(rt);
         setEvo(ev);
+        setCarteira(cart);
         setErro(null);
       })
       .catch((e: unknown) => {
@@ -56,7 +60,14 @@ function Pagina() {
 
   useMercadoAtualizado(carregar);
 
-  const composicao = (r?.composicao ?? []).filter((c) => classeNoRecorte(recorte, c.classe));
+  const composicao = (carteira?.variacaoGrupos ?? [])
+    .filter((g) => classeNoRecorte(recorte, g.grupo))
+    .map((g) => ({
+      classe: g.grupo,
+      valor: g.valor,
+      variacaoPct: g.variacaoPct,
+      variacaoReais: g.variacaoReais,
+    }));
   const totalComp = composicao.reduce((s, c) => s + c.valor, 0);
 
   return (

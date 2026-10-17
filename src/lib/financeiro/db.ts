@@ -151,6 +151,11 @@ function migrarSchema(db: Database): void {
   garantirColuna(db, "renda_fixa", "cotacao_efetiva", "REAL");
   garantirColuna(db, "renda_fixa", "iof_brl", "REAL");
   garantirColuna(db, "renda_fixa", "spread_brl", "REAL");
+  garantirColuna(db, "renda_fixa", "data_resgate", "TEXT");
+  garantirColuna(db, "renda_fixa", "valor_liq_recebido", "REAL");
+  garantirColuna(db, "renda_fixa", "valor_resgatado", "REAL");
+  garantirColuna(db, "renda_fixa", "tipo_resgate", "TEXT");
+  garantirColuna(db, "renda_fixa", "status", "TEXT");
   db.run(`
     CREATE TABLE IF NOT EXISTS snapshots_patrimonio (
       data TEXT PRIMARY KEY,
@@ -240,11 +245,17 @@ export async function getDb(): Promise<Database> {
   return iniciando;
 }
 
-/** Persiste o estado atual no IndexedDB e agenda o espelho (se houver sessão). */
+/** Persiste o estado atual no IndexedDB e avisa as telas abertas. */
 export async function salvarDb(): Promise<void> {
   if (!instancia) return;
   await gravarArquivo(instancia.export());
   void import("@/services/sync-service").then((m) => m.agendarFlushSync());
+  if (typeof window === "undefined") return;
+  const w = window as Window & { __cfDados?: number };
+  window.clearTimeout(w.__cfDados);
+  w.__cfDados = window.setTimeout(() => {
+    window.dispatchEvent(new Event("cf-dados"));
+  }, 80);
 }
 
 export type LinhaSql = Record<string, string | number | null>;

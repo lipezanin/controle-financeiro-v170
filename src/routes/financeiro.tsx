@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { SectionTitle } from "@/components/section-title";
 import { formatBRL, formatData, formatPct } from "@/lib/financeiro/format";
+import { anoDoPeriodo } from "@/lib/financeiro/periodo";
+import { usePeriodo } from "@/hooks/periodo-context";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { cn } from "@/lib/utils";
 import { resumoAnual, type ResumoFinanceiro } from "@/services/financeiro-service";
 
@@ -11,14 +14,20 @@ export const Route = createFileRoute("/financeiro")({
 });
 
 function Pagina() {
+  const { periodo } = usePeriodo();
   const [r, setR] = useState<ResumoFinanceiro | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
-    void resumoAnual()
+    void resumoAnual(anoDoPeriodo(periodo))
       .then(setR)
       .catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha no módulo financeiro"));
-  }, []);
+  }, [periodo]);
+
+  const recarregar = useCallback(() => {
+    void resumoAnual(anoDoPeriodo(periodo)).then(setR).catch(() => undefined);
+  }, [periodo]);
+  useMercadoAtualizado(recarregar);
 
   return (
     <div className="mx-auto max-w-6xl">

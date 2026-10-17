@@ -1,14 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CampoValor } from "@/components/campo-valor";
 import { KpiCard } from "@/components/kpi-card";
 import { SectionTitle } from "@/components/section-title";
+import { Button } from "@/components/ui/button";
 import { compararSort, ThSort, type DirSort } from "@/components/th-sort";
 import { formatBRL, formatData, formatPct } from "@/lib/financeiro/format";
 import { cn } from "@/lib/utils";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { useRecorteMercado } from "@/hooks/mercado-context";
 import { passaRecorte } from "@/lib/financeiro/mercado";
-import { listarRendaFixa, type ResumoRf, type TituloRf } from "@/services/renda-fixa-service";
+import { listarRendaFixa, resgatarTituloRf, type ResumoRf, type TituloRf } from "@/services/renda-fixa-service";
+import { parseNumeroBR } from "@/utils/numeros-br";
 
 export const Route = createFileRoute("/renda-fixa")({
   component: Pagina,
@@ -51,6 +54,11 @@ function Pagina() {
   const [erro, setErro] = useState<string | null>(null);
   const [campo, setCampo] = useState<string | null>(null);
   const [dir, setDir] = useState<DirSort>("asc");
+  const [liqId, setLiqId] = useState<number | null>(null);
+  const [liqData, setLiqData] = useState("");
+  const [liqValor, setLiqValor] = useState("");
+  const [liqIr, setLiqIr] = useState("");
+  const [liqMsg, setLiqMsg] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -145,6 +153,7 @@ function Pagina() {
               <ThSort label="Líquido hoje" campo="liquido" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Renta líq." campo="rentLiq" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Carga trib." campo="carga" atual={campo} dir={dir} onClick={clicar} align="right" />
+              <th className="px-2 py-2.5" />
             </tr>
           </thead>
           <tbody>
@@ -186,11 +195,77 @@ function Pagina() {
                 <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(t.valorLiquido)}</td>
                 <td className="px-2 py-2 text-right font-mono tabular">{formatPct(t.rentabilidadeLiquida, 2)}</td>
                 <td className="px-2 py-2 text-right font-mono tabular text-warn">{formatPct(t.cargaTributaria, 2)}</td>
+                <td className="px-2 py-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setLiqId(t.id);
+                      setLiqData(t.dataVencimento ?? new Date().toISOString().slice(0, 10));
+                      setLiqValor("");
+                      setLiqIr("");
+                      setLiqMsg(null);
+                    }}
+                  >
+                    Liquidar
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {liqId != null ? (
+        <form
+          className="mt-4 grid grid-cols-1 gap-3 rounded-[16px] border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const id = liqId;
+            void resgatarTituloRf(id, liqData, parseNumeroBR(liqValor), parseNumeroBR(liqIr))
+              .then(async (r) => {
+                setLiqMsg(
+                  `Posição zerada em ${liqData}. Lucro líquido ${formatBRL(r.lucro)} entrou no IRPFM.`,
+                );
+                setLiqId(null);
+                await carregar();
+              })
+              .catch((err: unknown) => setLiqMsg(err instanceof Error ? err.message : "Falha ao liquidar"));
+          }}
+        >
+          <p className="sm:col-span-2 lg:col-span-4 text-sm text-muted">
+            Liquidar {titulos.find((t) => t.id === liqId)?.ticker ?? "título"}. Informe o líquido que caiu na conta
+            na data do crédito. O lucro (líquido − aplicado) entra no IRPFM; o principal deixa a carteira.
+          </p>
+          <label className="text-xs text-muted">
+            Data do crédito
+            <input
+              type="date"
+              required
+              value={liqData}
+              onChange={(e) => setLiqData(e.target.value)}
+              className="mt-1 h-11 w-full rounded-md border border-input-border bg-input px-3 text-sm text-fg"
+            />
+          </label>
+          <label className="text-xs text-muted">
+            Valor líquido recebido
+            <CampoValor value={liqValor} onChange={setLiqValor} />
+          </label>
+          <label className="text-xs text-muted">
+            IR já retido (se houver)
+            <CampoValor value={liqIr} onChange={setLiqIr} />
+          </label>
+          <div className="flex items-end gap-2">
+            <Button type="submit" size="sm">
+              Confirmar liquidação
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => setLiqId(null)}>
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      ) : null}
+      {liqMsg ? <p className="mt-3 text-sm text-muted">{liqMsg}</p> : null}
     </div>
   );
 }

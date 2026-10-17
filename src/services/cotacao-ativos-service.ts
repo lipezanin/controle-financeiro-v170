@@ -153,30 +153,36 @@ async function viaBrapi(tickers: string[], token: string): Promise<CotacaoAtivo[
 
 async function viaYahoo(ticker: string, categoria: string): Promise<CotacaoAtivo | null> {
   const symbol = B3.has(categoria) ? `${ticker}.SA` : ticker;
-  const r = await fetch(`/proxy/cotacao?symbol=${encodeURIComponent(symbol)}`);
+  const r = await fetch(
+    `/proxy/cotacao?symbol=${encodeURIComponent(symbol)}&range=2y&events=div`,
+  );
   if (!r.ok) return null;
   const json = (await r.json()) as {
     chart?: {
       result?: {
-        meta?: {
-          regularMarketPrice?: number;
-          currency?: string;
-          trailingAnnualDividendYield?: number;
-          dividendYield?: number;
-        };
+        meta?: { regularMarketPrice?: number; currency?: string };
+        events?: { dividends?: Record<string, { amount?: number; date?: number }> };
       }[];
     };
   };
-  const meta = json.chart?.result?.[0]?.meta;
-  const preco = Number(meta?.regularMarketPrice);
+  const item = json.chart?.result?.[0];
+  const preco = Number(item?.meta?.regularMarketPrice);
   if (!Number.isFinite(preco) || preco <= 0) return null;
+  const agora = Math.floor(Date.now() / 1000);
+  const corte = agora - 365 * 24 * 60 * 60;
+  let pago12m = 0;
+  for (const d of Object.values(item?.events?.dividends ?? {})) {
+    const data = Number(d.date);
+    const valor = Number(d.amount);
+    if (data >= corte && data <= agora && valor > 0) pago12m += valor;
+  }
   return {
     ticker,
     preco,
-    moeda: meta?.currency ?? "BRL",
-    fonte: "Yahoo Finance (fallback)",
+    moeda: item?.meta?.currency ?? "BRL",
+    fonte: pago12m > 0 ? "Yahoo Finance (dividendos 12 meses)" : "Yahoo Finance",
     dataPreco: new Date().toISOString().slice(0, 10),
-    dividendYield: normalizarDy(meta?.trailingAnnualDividendYield ?? meta?.dividendYield),
+    dividendYield: pago12m > 0 ? pago12m / preco : null,
   };
 }
 
@@ -194,27 +200,30 @@ export async function atualizarPosicoes(): Promise<{
   const token = tokenRow?.valor ? String(tokenRow.valor) : "";
 
   const obtidos = new Map<string, CotacaoAtivo>();
-  let fonte = "Yahoo Finance (fallback)";
-
-  if (token && unicos.size) {
-    try {
-      const br = await viaBrapi([...unicos.keys()], token);
-      for (const c of br) obtidos.set(c.ticker, c);
-      if (br.length) fonte = "brapi.dev";
-    } catch {
-      /* cai no Yahoo */
-    }
-  }
-
+  let fonte = "Yahoo Finance";
   const falhas: string[] = [];
+
   for (const [ticker, categoria] of unicos) {
-    if (obtidos.has(ticker)) continue;
     try {
       const c = await viaYahoo(ticker, categoria);
       if (c) obtidos.set(ticker, c);
       else falhas.push(ticker);
     } catch {
       falhas.push(ticker);
+    }
+  }
+
+  if (token && falhas.length) {
+    try {
+      const br = await viaBrapi(falhas, token);
+      for (const c of br) {
+        obtidos.set(c.ticker, c);
+        const i = falhas.indexOf(c.ticker);
+        if (i >= 0) falhas.splice(i, 1);
+      }
+      if (br.length) fonte = "Yahoo Finance + brapi (só o que o Yahoo não respondeu)";
+    } catch {
+      /* preço fica sem cotação; a posição em custo continua na tela */
     }
   }
 

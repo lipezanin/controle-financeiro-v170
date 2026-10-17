@@ -42,7 +42,17 @@ export default async function cotacaoProxy(
       });
     }
     try {
-      const dest = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+      const modo = event.url.searchParams.get("modo");
+      const period1 = event.url.searchParams.get("period1");
+      const period2 = event.url.searchParams.get("period2");
+      const range = event.url.searchParams.get("range") || "5d";
+      const events = event.url.searchParams.get("events");
+      const dest =
+        modo === "resumo"
+          ? `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryDetail`
+          : period1 && period2
+            ? `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&period1=${encodeURIComponent(period1)}&period2=${encodeURIComponent(period2)}${events ? `&events=${encodeURIComponent(events)}` : ""}`
+            : `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${encodeURIComponent(range)}${events ? `&events=${encodeURIComponent(events)}` : ""}`;
       const r = await fetch(dest, { headers: { "User-Agent": "ControleFinanceiroLocal/1.0" } });
       const text = await r.text();
       return new Response(text, {

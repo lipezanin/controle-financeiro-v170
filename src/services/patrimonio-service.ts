@@ -9,7 +9,8 @@ import { CLASSES_INVESTIMENTO, FAIXAS_LIQUIDEZ } from "@/lib/financeiro/theme";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 const COMPRAS = "('Compra','Parcela Imóvel','ITBI / Cartório')";
-const RF_ATIVA = "tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0";
+const RF_ATIVA =
+  "tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0 AND COALESCE(status, 'Ativo') <> 'Resgatado'";
 
 const REND_MENSAL: { label: string; categoria: string }[] = [
   { label: "Renda Fixa", categoria: "Renda Fixa" },

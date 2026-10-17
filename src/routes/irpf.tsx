@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { KpiCard } from "@/components/kpi-card";
 import { PainelFiscal } from "@/components/painel-fiscal";
 import { RelatorioIrpfPainel } from "@/components/relatorio-irpf";
@@ -7,6 +7,7 @@ import { SectionTitle } from "@/components/section-title";
 import { formatBRL, formatPct } from "@/lib/financeiro/format";
 import { cn } from "@/lib/utils";
 import { usePeriodo } from "@/hooks/periodo-context";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { calcularMotorMensal, type ResumoIrpf } from "@/services/irpf-service";
 
@@ -24,6 +25,11 @@ function Pagina() {
       .then(setR)
       .catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha no motor IRPFM"));
   }, [periodo]);
+
+  const recarregar = useCallback(() => {
+    void calcularMotorMensal(anoDoPeriodo(periodo)).then(setR).catch(() => undefined);
+  }, [periodo]);
+  useMercadoAtualizado(recarregar);
 
   const pisoPct = r ? Math.min(100, (r.baseComputavelAcum / r.isentoAte) * 100) : 0;
 

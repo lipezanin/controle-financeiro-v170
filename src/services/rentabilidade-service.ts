@@ -50,7 +50,8 @@ export async function resumirRentabilidade(filtro: FiltroRentabilidade = {}): Pr
   const db = await getDb();
   const ativas = carteira.ativas.flatMap((g) =>
     !filtro.grupo || g.grupo === filtro.grupo ? g.posicoes : [],
-  ).filter((p) => passaRecorte(filtro.recorte ?? "tudo", p.categoria));
+  ).filter((p) => passaRecorte(filtro.recorte ?? "tudo", p.categoria))
+    .filter((p) => filtro.grupo === "Imóveis" || p.grupo !== "Imóveis");
   const custo = ativas.reduce((s, p) => s + p.valorInvestido, 0);
   const mercado = ativas.reduce((s, p) => s + mercadoDe(p), 0);
   const tickers = ativas.map((p) => p.ticker).filter(Boolean);
@@ -63,7 +64,12 @@ export async function resumirRentabilidade(filtro: FiltroRentabilidade = {}): Pr
         : null;
   let proventos = ativas.reduce((s, p) => s + p.proventosLiq, 0);
   let gcRealizado = num(
-    consultar(db, `SELECT COALESCE(SUM(ganho_capital_brl), 0) AS v FROM transacoes`)[0]?.v,
+    consultar(
+      db,
+      filtro.grupo === "Imóveis"
+        ? `SELECT COALESCE(SUM(ganho_capital_brl), 0) AS v FROM transacoes WHERE categoria = 'Imóvel'`
+        : `SELECT COALESCE(SUM(ganho_capital_brl), 0) AS v FROM transacoes WHERE COALESCE(categoria, '') <> 'Imóvel'`,
+    )[0]?.v,
   );
   if (recorte || tickers.length) {
     const ph = tickers.map(() => "?").join(",") || "''";

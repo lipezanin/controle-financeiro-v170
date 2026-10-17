@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePeriodo } from "@/hooks/periodo-context";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { KpiCard } from "@/components/kpi-card";
 import { Button } from "@/components/ui/button";
@@ -17,11 +18,17 @@ export function RelatorioIrpfPainel() {
   const [r, setR] = useState<RelatorioIrpf | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
-  useEffect(() => {
+  const carregar = useCallback(() => {
     void montarRelatorioIrpf(anoDoPeriodo(periodo))
       .then(setR)
       .catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha no relatório"));
   }, [periodo]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  useMercadoAtualizado(carregar);
 
   return (
     <section id="relatorio" className="mt-10">

@@ -6,6 +6,7 @@ import { SectionTitle } from "@/components/section-title";
 import { formatBRL, formatData } from "@/lib/financeiro/format";
 import { cn } from "@/lib/utils";
 import { usePeriodo } from "@/hooks/periodo-context";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { resumirCaixa, type ResumoCaixa } from "@/services/caixa-service";
 import { ConferenciaCaixaPainel } from "@/components/conferencia-caixa";
@@ -31,6 +32,10 @@ function Pagina() {
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  useMercadoAtualizado(() => {
+    void carregar();
+  });
 
   const serieCaixa = useMemo(() => {
     const movs = r?.movimentos ?? [];

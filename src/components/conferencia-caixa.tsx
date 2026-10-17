@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { CampoValor } from "@/components/campo-valor";
 import { Button } from "@/components/ui/button";
 import { formatBRL, formatData } from "@/lib/financeiro/format";
@@ -45,6 +46,10 @@ export function ConferenciaCaixaPainel({
   useEffect(() => {
     void carregar().catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha"));
   }, [carregar]);
+
+  useMercadoAtualizado(() => {
+    void carregar().catch(() => undefined);
+  });
 
   const valorContado = parseNumeroBR(contado);
   const diff = contado ? valorContado - sistema : 0;

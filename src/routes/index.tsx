@@ -15,6 +15,7 @@ import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { formatBRL, formatPct } from "@/lib/financeiro/format";
 import { importarCotahist } from "@/services/cotacao-ativos-service";
 import { evolucaoPatrimonio, type PontoEvolucao } from "@/services/evolucao-patrimonio-service";
+import { listarCarteira, type Carteira } from "@/services/investimento-service";
 import { resumirPatrimonio, type ResumoPatrimonio } from "@/services/patrimonio-service";
 import { resumirRentabilidade, type Rentabilidade } from "@/services/rentabilidade-service";
 import { listarIndicadores, type Indicador } from "@/services/taxas-service";
@@ -29,6 +30,7 @@ function Dashboard() {
   const [rent, setRent] = useState<Rentabilidade | null>(null);
   const [inds, setInds] = useState<Indicador[]>([]);
   const [evo, setEvo] = useState<PontoEvolucao[]>([]);
+  const [carteira, setCarteira] = useState<Carteira | null>(null);
   const [status, setStatus] = useState<"iniciando" | "pronto" | "erro">("iniciando");
   const [msg, setMsg] = useState("Preparando banco local");
   const [busy, setBusy] = useState<string | null>(null);
@@ -37,7 +39,7 @@ function Dashboard() {
 
   const carregar = useCallback(async () => {
     try {
-      const [dados, rtb, ind, ev] = await Promise.all([
+      const [dados, rtb, ind, ev, cart] = await Promise.all([
         resumirPatrimonio(periodo),
         resumirRentabilidade({
           periodo: periodo.modo === "tudo" ? "tudo" : "ano",
@@ -45,11 +47,13 @@ function Dashboard() {
         }).catch(() => null),
         listarIndicadores().catch(() => [] as Indicador[]),
         evolucaoPatrimonio(periodo).catch(() => [] as PontoEvolucao[]),
+        listarCarteira().catch(() => null),
       ]);
       setResumo(dados);
       setRent(rtb);
       setInds(ind);
       setEvo(ev);
+      setCarteira(cart);
       setStatus("pronto");
       setMsg(
         dados.contagens.transacoes
@@ -125,8 +129,11 @@ function Dashboard() {
 
   const r = resumo;
   const composicao = useMemo(
-    () => (r?.composicao ?? []).filter((c) => classeNoRecorte(recorte, c.classe)),
-    [r, recorte],
+    () =>
+      (carteira?.variacaoGrupos ?? [])
+        .filter((g) => classeNoRecorte(recorte, g.grupo))
+        .map((g) => ({ classe: g.grupo, valor: g.valor })),
+    [carteira, recorte],
   );
 
   return (

@@ -1,6 +1,7 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CampoValor } from "@/components/campo-valor";
+import { SelectCadastro } from "@/components/select-cadastro";
 import { ConferenciaCaixaPainel } from "@/components/conferencia-caixa";
 import { ExtratoInternacional } from "@/components/extrato-internacional";
 import { FormRfInternacional } from "@/components/form-rf-internacional";
@@ -10,6 +11,7 @@ import { NotaInternacional } from "@/components/nota-internacional";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { usePeriodo } from "@/hooks/periodo-context";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { formatBRL, formatData } from "@/lib/financeiro/format";
 import { dataNoPeriodo } from "@/lib/financeiro/periodo";
 import { cn } from "@/lib/utils";
@@ -23,9 +25,6 @@ import {
   excluirTodasTransacoes,
   excluirTodosRendimentos,
   excluirTransacoes,
-  lancarDespesasLote,
-  lancarRendimentosLote,
-  lancarTransacoesLote,
   listarDespesas,
   listarRendimentos,
   listarTransacoes,
@@ -37,7 +36,6 @@ import {
   atualizarMovimento,
   excluirMovimentos,
   excluirTodosMovimentos,
-  lancarMovimento,
   resumirCaixa,
   type MovimentoCaixa,
 } from "@/services/caixa-service";
@@ -97,7 +95,6 @@ const campo = "h-10 w-full rounded-md border border-input-border bg-input px-2 t
 
 function Pagina() {
   const { tipo } = Route.useSearch();
-  const navigate = useNavigate({ from: "/lancamentos" });
   const { periodo } = usePeriodo();
   const [txs, setTxs] = useState<LinhaTransacao[]>([]);
   const [desps, setDesps] = useState<LinhaDespesa[]>([]);
@@ -106,7 +103,6 @@ function Pagina() {
   const [sel, setSel] = useState<number[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const [lote, setLote] = useState("");
   const [confirmar, setConfirmar] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
 
@@ -128,6 +124,10 @@ function Pagina() {
     void carregar().catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha"));
   }, [carregar]);
 
+  useMercadoAtualizado(() => {
+    void carregar().catch(() => undefined);
+  });
+
   const linhasTx = useMemo(() => txs.filter((x) => dataNoPeriodo(x.data, periodo)), [txs, periodo]);
   const linhasDesp = useMemo(
     () => desps.filter((x) => dataNoPeriodo(x.vencimento, periodo)),
@@ -135,42 +135,6 @@ function Pagina() {
   );
   const linhasRend = useMemo(() => rends.filter((x) => dataNoPeriodo(x.data, periodo)), [rends, periodo]);
   const linhasCx = useMemo(() => cx.filter((x) => dataNoPeriodo(x.data, periodo)), [cx, periodo]);
-
-  function setTipo(t: TipoAba) {
-    void navigate({ search: { tipo: t } });
-    setSel([]);
-    setEditId(null);
-    setMsg(null);
-  }
-
-  async function onLote() {
-    setErro(null);
-    try {
-      let n = 0;
-      if (tipo === "tx") n = await lancarTransacoesLote(lote);
-      if (tipo === "desp") n = await lancarDespesasLote(lote);
-      if (tipo === "rend") n = await lancarRendimentosLote(lote);
-      if (tipo === "caixa") {
-        const ls = lote.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        for (const ln of ls) {
-          if (ln.toLowerCase().startsWith("data")) continue;
-          const p = ln.split(";").map((x) => x.trim());
-          await lancarMovimento({
-            data: p[0] ?? "",
-            tipo: p[1] === "Saque" ? "Saque" : "Depósito",
-            valor: parseNumeroBR(p[2]),
-            descricao: p[3],
-          });
-          n += 1;
-        }
-      }
-      setMsg(`${n} registro(s) lançados.`);
-      setLote("");
-      await carregar();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Falha no lote");
-    }
-  }
 
   async function onExcluirSel() {
     if (!sel.length) return;
@@ -197,15 +161,6 @@ function Pagina() {
     await carregar();
   }
 
-  const placeholder =
-    tipo === "tx"
-      ? "data;tipo;categoria;ticker;quantidade;valor;nota"
-      : tipo === "desp"
-        ? "vencimento;categoria;descricao;valor;pagamento"
-        : tipo === "rend"
-          ? "data;tipo;valor;ticker"
-          : "data;Depósito|Saque;valor;descricao";
-
   const mostraDiario = tipo === "tx" || tipo === "desp" || tipo === "rend" || tipo === "caixa";
   const abaForm =
     tipo === "conferencia" || tipo === "nota_int" || tipo === "extrato_int" || tipo === "rf_int" || tipo === "tx_int"
@@ -216,28 +171,6 @@ function Pagina() {
   return (
     <div className="mx-auto max-w-6xl">
       <SectionTitle kicker="Lançamentos" title={meta.title} description={meta.desc} />
-      <div className="mb-4 flex flex-wrap gap-2">
-        {(
-          [
-            ["nota", "Nota"],
-            ["extrato", "Extrato"],
-            ["imovel", "Imóvel"],
-            ["tx", "Transações"],
-            ["desp", "Contas a pagar"],
-            ["rend", "Rendimentos"],
-            ["caixa", "Caixa físico"],
-            ["conferencia", "Conferência"],
-            ["nota_int", "Nota intl"],
-            ["extrato_int", "Extrato intl"],
-            ["rf_int", "RF intl"],
-            ["tx_int", "Avulsa intl"],
-          ] as const
-        ).map(([id, label]) => (
-          <Button key={id} size="sm" variant={tipo === id ? "default" : "secondary"} onClick={() => setTipo(id)}>
-            {label}
-          </Button>
-        ))}
-      </div>
       {erro ? <p className="mb-2 text-sm text-loss">{erro}</p> : null}
       {msg ? <p className="mb-2 text-sm text-gain">{msg}</p> : null}
 
@@ -257,19 +190,6 @@ function Pagina() {
 
       {mostraDiario ? (
         <>
-          <p className="mb-2 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-            Lote
-          </p>
-          <textarea
-            value={lote}
-            onChange={(e) => setLote(e.target.value)}
-            placeholder={placeholder}
-            className="mb-2 h-28 w-full rounded-[12px] border border-input-border bg-input p-3 font-mono text-xs text-fg"
-          />
-          <Button type="button" size="sm" onClick={() => void onLote()}>
-            Lançar lote
-          </Button>
-
           <div className="mt-6 flex flex-wrap items-end gap-2">
             <Button type="button" size="sm" variant="secondary" disabled={!sel.length} onClick={() => void onExcluirSel()}>
               Excluir selecionados ({sel.length})
@@ -543,9 +463,13 @@ function EditorTx({
       <td className="px-1 py-1" colSpan={7}>
         <div className="flex flex-wrap gap-1">
           <input className={campo} type="date" value={data} onChange={(e) => setData(e.target.value)} />
-          <input className={campo} value={tipo} onChange={(e) => setTipo(e.target.value)} />
+          <div className="w-40">
+            <SelectCadastro sessao="tipo_movimentacao" value={tipo} onChange={setTipo} className={campo} />
+          </div>
           <input className={campo} value={ticker} onChange={(e) => setTicker(e.target.value)} />
-          <input className={campo} value={categoria} onChange={(e) => setCategoria(e.target.value)} />
+          <div className="w-48">
+            <SelectCadastro sessao="categoria_investimento" value={categoria} onChange={setCategoria} className={campo} />
+          </div>
           <div className="w-28">
             <CampoValor className="h-10" modo="qtd" value={qtd} onChange={setQtd} />
           </div>
@@ -600,7 +524,9 @@ function EditorDesp({
     <td className="px-1 py-1" colSpan={6}>
       <div className="flex flex-wrap gap-1">
         <input className={campo} type="date" value={vencimento} onChange={(e) => setV(e.target.value)} />
-        <input className={campo} value={categoria} onChange={(e) => setC(e.target.value)} />
+        <div className="w-48">
+          <SelectCadastro sessao="categoria_despesa" value={categoria} onChange={setC} className={campo} />
+        </div>
         <input className={campo} value={descricao} onChange={(e) => setD(e.target.value)} />
         <div className="w-36">
           <CampoValor className="h-10" value={valor} onChange={setValor} />
@@ -645,7 +571,9 @@ function EditorRend({
     <td className="px-1 py-1" colSpan={5}>
       <div className="flex flex-wrap gap-1">
         <input className={campo} type="date" value={data} onChange={(e) => setData(e.target.value)} />
-        <input className={campo} value={tipo} onChange={(e) => setTipo(e.target.value)} />
+        <div className="w-56">
+          <SelectCadastro sessao="tipo_rendimento" value={tipo} onChange={setTipo} className={campo} />
+        </div>
         <input className={campo} value={ticker} onChange={(e) => setTicker(e.target.value)} />
         <div className="w-36">
           <CampoValor className="h-10" value={valor} onChange={setValor} />

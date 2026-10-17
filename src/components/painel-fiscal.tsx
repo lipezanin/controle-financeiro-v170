@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePeriodo } from "@/hooks/periodo-context";
+import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { GraficoRendimentosAportes } from "@/components/graficos-financeiro";
 import { KpiCard } from "@/components/kpi-card";
@@ -28,7 +29,7 @@ export function PainelFiscal() {
   const [erro, setErro] = useState<string | null>(null);
   const [limiarPct, setLimiarPct] = useState("80");
 
-  useEffect(() => {
+  const carregar = useCallback(() => {
     void resumirControleFiscal(anoDoPeriodo(periodo))
       .then((x) => {
         setR(x);
@@ -36,6 +37,12 @@ export function PainelFiscal() {
       })
       .catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha no controle fiscal"));
   }, [periodo]);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  useMercadoAtualizado(carregar);
 
   async function salvarLimiar() {
     const v = Number(limiarPct.replace(",", ".")) / 100;
@@ -78,8 +85,24 @@ export function PainelFiscal() {
         <KpiCard
           label="Consistência (rend+resg − aportes)"
           value={formatBRL(r?.consistencia)}
-          tom={(r?.consistencia ?? 0) >= 0 ? "gain" : "loss"}
-          hint={(r?.consistencia ?? 0) >= 0 ? "Sobra de recursos" : "Origem a justificar"}
+          tom={
+            (r?.consistencia ?? 0) >= 0
+              ? "gain"
+              : (r?.cobertura ?? 1) >= (r?.limiar ?? 0.8)
+                ? "warn"
+                : "loss"
+          }
+          hint={
+            r
+              ? `${formatBRL(r.rendimentosTotais)} + ${formatBRL(r.resgatesAno)} − ${formatBRL(r.aportesAno)}. ${
+                  r.consistencia >= 0
+                    ? "Sobra de recursos no ano."
+                    : (r.cobertura ?? 0) >= r.limiar
+                      ? "Compras um pouco acima da renda e das vendas. Não é prejuízo."
+                      : "Origem a justificar."
+                }`
+              : undefined
+          }
         />
         <KpiCard
           label="Cobertura dos aportes"

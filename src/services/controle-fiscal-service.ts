@@ -108,6 +108,21 @@ export async function resumirControleFiscal(anoForcado?: number): Promise<Resumo
     `SELECT data, valor_brl AS v FROM transacoes WHERE tipo_operacao = 'Venda'`,
   ).map((r) => ({ data: campo(r, "data"), valor: num(campo(r, "v")) }));
 
+  const rfResgates: { data: unknown; valor: number }[] = consultar(
+    db,
+    `SELECT COALESCE(NULLIF(TRIM(data_resgate), ''), data_aplicacao) AS data,
+            CASE
+              WHEN COALESCE(valor_liq_recebido, 0) > 0 THEN valor_liq_recebido
+              WHEN COALESCE(valor_resgatado, 0) > 0 THEN valor_resgatado
+              ELSE COALESCE(valor_aplicado, 0)
+            END AS v
+     FROM renda_fixa
+     WHERE (
+       (data_resgate IS NOT NULL AND TRIM(data_resgate) <> '' AND COALESCE(valor_liq_recebido, valor_resgatado, 0) > 0)
+       OR tipo_movimento IN ('Resgate', 'Resgate do Principal')
+     )`,
+  ).map((r) => ({ data: campo(r, "data"), valor: num(campo(r, "v")) }));
+
   const rf: { data: unknown; valor: number }[] = consultar(
     db,
     `SELECT data_aplicacao AS data, valor_aplicado AS v FROM renda_fixa
@@ -124,11 +139,12 @@ export async function resumirControleFiscal(anoForcado?: number): Promise<Resumo
   const noAno = (dt: { ano: number }) => dt.ano === ano;
 
   const patrimonioInicial =
-    somarFluxo(compras, antes) + somarFluxo(rf, antes) - somarFluxo(vendas, antes);
+    somarFluxo(compras, antes) + somarFluxo(rf, antes) - somarFluxo(vendas, antes) - somarFluxo(rfResgates, antes);
   const patrimonioFinal =
     somarFluxo(compras, (d) => d.raw < corteFim) +
     somarFluxo(rf, (d) => d.raw < corteFim) -
-    somarFluxo(vendas, (d) => d.raw < corteFim);
+    somarFluxo(vendas, (d) => d.raw < corteFim) -
+    somarFluxo(rfResgates, (d) => d.raw < corteFim);
 
   const rendMes = Array(13).fill(0);
   const provMes = Array(13).fill(0);
@@ -158,6 +174,10 @@ export async function resumirControleFiscal(anoForcado?: number): Promise<Resumo
     if (dt && noAno(dt)) apMes[dt.mes] += l.valor;
   }
   for (const l of vendas) {
+    const dt = parseIso(l.data);
+    if (dt && noAno(dt)) resgMes[dt.mes] += l.valor;
+  }
+  for (const l of rfResgates) {
     const dt = parseIso(l.data);
     if (dt && noAno(dt)) resgMes[dt.mes] += l.valor;
   }

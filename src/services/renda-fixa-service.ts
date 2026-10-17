@@ -11,7 +11,8 @@ import { buscarSerieSgs, atualizarTaxas } from "@/services/taxas-service";
 import { casarTesouro, listarPrecosTesouro, type PrecoTesouro } from "@/services/tesouro-service";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
-const RF_ATIVA = "tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0";
+const RF_ATIVA =
+  "tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0 AND COALESCE(status, 'Ativo') <> 'Resgatado'";
 
 function num(v: unknown): number {
   return typeof v === "number" ? v : Number(v) || 0;
@@ -317,4 +318,55 @@ export async function atualizarRendaFixa(opts?: { pularTaxas?: boolean }): Promi
   }
   await salvarDb();
   return { atualizados: n, fonte: nTesouro ? `BCB SGS + Tesouro (${nTesouro})` : "BCB SGS" };
+}
+
+/** Vencimento ou resgate de CDB/LCA/Tesouro: zera a posição na data do crédito e lança o lucro no IRPFM. */
+export async function resgatarTituloRf(
+  id: number,
+  data: string,
+  valorLiquido: number,
+  irRetido = 0,
+): Promise<{ lucro: number }> {
+  const db = await getDb();
+  const row = consultar(db, `SELECT * FROM renda_fixa WHERE id = ?`, [id])[0];
+  if (!row) throw new Error("Título não encontrado.");
+  if (str(campo(row, "status")) === "Resgatado") throw new Error("Este título já foi liquidado.");
+  const aplicado = num(campo(row, "valor_aplicado"));
+  if (!data || valorLiquido <= 0) {
+    throw new Error("Informe a data em que o valor entrou e o líquido recebido.");
+  }
+  const ir = Math.max(0, irRetido);
+  const lucroLiquido = valorLiquido - aplicado;
+  const lucroBruto = lucroLiquido + ir;
+  executar(
+    db,
+    `UPDATE renda_fixa
+     SET status = 'Resgatado', data_resgate = ?, valor_liq_recebido = ?, valor_resgatado = ?,
+         tipo_resgate = 'Vencimento', valor_mercado = 0
+     WHERE id = ?`,
+    [data, valorLiquido, valorLiquido, id],
+  );
+  if (lucroBruto > 0.004) {
+    const ticker = str(campo(row, "ticker")) || str(campo(row, "nome")) || null;
+    executar(
+      db,
+      `INSERT INTO rendimentos (
+          data, tipo, categoria, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
+          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao
+        ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data,
+        lucroBruto,
+        lucroBruto,
+        Math.max(0, lucroLiquido),
+        lucroBruto,
+        ir,
+        ticker,
+        str(campo(row, "instituicao")) || null,
+        `Liquidação ${ticker ?? "renda fixa"} · líquido recebido ${valorLiquido.toFixed(2)}`,
+      ],
+    );
+  }
+  await salvarDb();
+  return { lucro: lucroLiquido };
 }
