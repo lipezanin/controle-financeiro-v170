@@ -15,11 +15,15 @@ SetCompressor /SOLID lzma
 !include "MUI2.nsh"
 !include "x64.nsh"
 
-Name "Controle Financeiro 1.7.0"
+!ifndef APPVER
+  !define APPVER "2.0.0"
+!endif
+
+Name "Controle Financeiro ${APPVER}"
 OutFile "${OUT}"
 InstallDir "$PROGRAMFILES64\Controle Financeiro"
 InstallDirRegKey HKLM "Software\ControleFinanceiro" "InstallDir"
-BrandingText "Controle Financeiro 1.7.0"
+BrandingText "Controle Financeiro ${APPVER}"
 
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_NOAUTOCLOSE
@@ -34,17 +38,23 @@ BrandingText "Controle Financeiro 1.7.0"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "PortugueseBR"
 
-VIProductVersion "1.7.0.0"
+VIProductVersion "${APPVER}.0"
 VIAddVersionKey /LANG=1046 "ProductName" "Controle Financeiro"
 VIAddVersionKey /LANG=1046 "FileDescription" "Instalador do Controle Financeiro"
-VIAddVersionKey /LANG=1046 "FileVersion" "1.7.0"
-VIAddVersionKey /LANG=1046 "ProductVersion" "1.7.0"
+VIAddVersionKey /LANG=1046 "FileVersion" "${APPVER}"
+VIAddVersionKey /LANG=1046 "ProductVersion" "${APPVER}"
 VIAddVersionKey /LANG=1046 "LegalCopyright" "Uso local"
 
 Function .onInit
   ${If} ${RunningX64}
     SetRegView 64
   ${EndIf}
+FunctionEnd
+
+Function .onInstSuccess
+  IfSilent 0 fimSilencioso
+    Exec '"$INSTDIR\ControleFinanceiro.exe"'
+  fimSilencioso:
 FunctionEnd
 
 Section "Instalar" SecInst
@@ -61,11 +71,11 @@ Section "Instalar" SecInst
 
   WriteUninstaller "$INSTDIR\Desinstalar.exe"
   WriteRegStr HKLM "Software\ControleFinanceiro" "InstallDir" "$INSTDIR"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "DisplayName" "Controle Financeiro 1.7.0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "DisplayName" "Controle Financeiro ${APPVER}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "UninstallString" "$INSTDIR\Desinstalar.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "DisplayIcon" "$INSTDIR\ControleFinanceiro.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "Publisher" "Controle Financeiro"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "DisplayVersion" "1.7.0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "DisplayVersion" "${APPVER}"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ControleFinanceiro" "NoRepair" 1
 SectionEnd

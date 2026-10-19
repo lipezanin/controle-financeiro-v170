@@ -2,7 +2,7 @@
  * Processo principal do app desktop (Windows).
  * Sobe o servidor Nitro local e abre a janela. Dados no SQLite/IndexedDB.
  */
-const { app, BrowserWindow, shell, session } = require("electron");
+const { app, BrowserWindow, shell, session, ipcMain, net } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -96,6 +96,60 @@ function criarJanela() {
     return { action: "deny" };
   });
 }
+
+function hostPermitido(url) {
+  try {
+    const h = new URL(url).hostname;
+    return (
+      h === "github.com" ||
+      h.endsWith(".githubusercontent.com") ||
+      h.endsWith(".github.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function baixarArquivo(url, dest) {
+  return new Promise((resolve, reject) => {
+    if (!hostPermitido(url)) {
+      reject(new Error("URL de atualização não permitida."));
+      return;
+    }
+    const req = net.request(url);
+    req.on("response", (res) => {
+      const codigo = res.statusCode || 0;
+      const loc = res.headers.location;
+      if (codigo >= 300 && codigo < 400 && loc) {
+        res.resume();
+        const proxima = new URL(loc, url).href;
+        baixarArquivo(proxima, dest).then(resolve, reject);
+        return;
+      }
+      if (codigo !== 200) {
+        res.resume();
+        reject(new Error(`Download HTTP ${codigo}`));
+        return;
+      }
+      const arquivo = fs.createWriteStream(dest);
+      res.pipe(arquivo);
+      arquivo.on("finish", () => arquivo.close(() => resolve(dest)));
+      arquivo.on("error", reject);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+ipcMain.handle("cf-atualizar", async (_evt, url) => {
+  if (typeof url !== "string") throw new Error("URL ausente.");
+  const dest = path.join(app.getPath("temp"), "ControleFinanceiro-Setup.exe");
+  await baixarArquivo(url, dest);
+  const instalador = spawn(dest, ["/S"], { detached: true, stdio: "ignore" });
+  instalador.unref();
+  setTimeout(() => app.quit(), 500);
+  return true;
+});
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {

@@ -1,6 +1,8 @@
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
+const { version } = require("./package.json");
 
 contextBridge.exposeInMainWorld("cfDesktop", {
   ativo: true,
-  versao: "1.1.0",
+  versao: version,
+  aplicarAtualizacao: (url) => ipcRenderer.invoke("cf-atualizar", url),
 });

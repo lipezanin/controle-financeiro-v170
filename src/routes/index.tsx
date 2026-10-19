@@ -19,6 +19,7 @@ import { listarCarteira, type Carteira } from "@/services/investimento-service";
 import { resumirPatrimonio, type ResumoPatrimonio } from "@/services/patrimonio-service";
 import { resumirRentabilidade, type Rentabilidade } from "@/services/rentabilidade-service";
 import { listarIndicadores, type Indicador } from "@/services/taxas-service";
+import { checarUpdate, onStatusUpdate } from "@/services/update-service";
 import { garantirImportacaoInicial, importarPlanilha, importarSeed } from "@/utils/import-excel";
 
 export const Route = createFileRoute("/")({ component: Dashboard });
@@ -36,6 +37,22 @@ function Dashboard() {
   const [busy, setBusy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const cotahistRef = useRef<HTMLInputElement>(null);
+  const [instalador, setInstalador] = useState({
+    href: "/downloads/ControleFinanceiro-Setup.exe",
+    rotulo: "Baixar última versão",
+  });
+
+  useEffect(() => {
+    const aplicar = (url: string | null, versao: string | null) => {
+      if (!url) return;
+      setInstalador({
+        href: url,
+        rotulo: versao ? `Baixar instalador ${versao}` : "Baixar última versão",
+      });
+    };
+    void checarUpdate().then((s) => aplicar(s.url, s.remota));
+    return onStatusUpdate((s) => aplicar(s.url, s.remota));
+  }, []);
 
   const carregar = useCallback(async () => {
     try {
@@ -151,13 +168,13 @@ function Dashboard() {
           atalho na Área de trabalho e desinstalador. Desinstale a versão antiga antes de instalar.
         </p>
         <a
-          href="/downloads/ControleFinanceiro-Setup.exe"
+          href={instalador.href}
           download="ControleFinanceiro-Setup.exe"
           target="_blank"
           rel="noreferrer"
           className="mt-3 inline-flex h-10 items-center rounded-[8px] bg-accent px-4 text-sm font-medium text-accent-fg hover:opacity-90"
         >
-          Baixar ControleFinanceiro-Setup.exe
+          {instalador.rotulo}
         </a>
       </div>
 

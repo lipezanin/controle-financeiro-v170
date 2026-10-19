@@ -67,5 +67,20 @@ export default async function cotacaoProxy(
     }
   }
 
+  if (path === "/api/latest") {
+    try {
+      const { lerLatest } = await import("../../server/latest-release.mjs");
+      const j = await lerLatest();
+      return new Response(JSON.stringify(j), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "latest" }), {
+        status: 502,
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
   return next();
 }

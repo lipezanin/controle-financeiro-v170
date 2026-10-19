@@ -1,29 +1,25 @@
 /**
- * Checa releases em public.app_versions (Supabase).
- * Não baixa o instalador sozinho: avisa e aponta a URL pública do Storage.
+ * Checa a última versão no GitHub (via /api/latest, que lê latest.json da Release).
+ * Não instala sozinho: o usuário confirma. No desktop, o processo principal baixa
+ * o Setup para %TEMP% e executa com /S (NSIS silencioso).
  */
 
-import { APP_CANAL, APP_VERSAO } from "@/lib/app-version";
-import { cabecalhosAnon, SUPABASE_REST, SUPABASE_URL } from "@/lib/supabase/config";
-
-export type ReleaseRemota = {
-  versao: string;
-  canal: string;
-  obrigatoria: boolean;
-  notas: string | null;
-  arquivo_url: string | null;
-  arquivo_path: string | null;
-  sha256: string | null;
-  created_at: string;
-};
+import { APP_VERSAO } from "@/lib/app-version";
 
 export type StatusUpdate = {
-  estado: "idle" | "checando" | "atualizado" | "disponivel" | "obrigatoria" | "indisponivel";
+  estado: "idle" | "checando" | "atualizado" | "disponivel" | "baixando" | "indisponivel";
   local: string;
   remota: string | null;
   notas: string | null;
   url: string | null;
   detalhe: string;
+};
+
+type LatestJson = { version?: string; url?: string; notes?: string | null };
+
+type Desktop = {
+  ativo?: boolean;
+  aplicarAtualizacao?: (url: string) => Promise<unknown>;
 };
 
 const DISMISS_KEY = "cf-update-dismiss";
@@ -73,14 +69,6 @@ export function versaoMaior(a: string, b: string): boolean {
   return false;
 }
 
-function urlArquivo(r: ReleaseRemota): string | null {
-  if (r.arquivo_url) return r.arquivo_url;
-  if (r.arquivo_path) {
-    return `${SUPABASE_URL.replace(/\/$/, "")}/storage/v1/object/public/releases/${r.arquivo_path.replace(/^\//, "")}`;
-  }
-  return null;
-}
-
 function dispensada(versao: string): boolean {
   if (typeof window === "undefined") return false;
   return localStorage.getItem(DISMISS_KEY) === versao;
@@ -95,61 +83,42 @@ export function dispensarUpdate(versao: string): void {
 export async function checarUpdate(): Promise<StatusUpdate> {
   emitir({ estado: "checando", detalhe: "Consultando versões…" });
   try {
-    const r = await fetch(
-      `${SUPABASE_REST}/app_versions?canal=eq.${encodeURIComponent(APP_CANAL)}&select=*&order=created_at.desc&limit=1`,
-      { headers: cabecalhosAnon() },
-    );
-    if (r.status === 404 || r.status === 406) {
-      emitir({ estado: "indisponivel", detalhe: "Catálogo de versões ainda não aplicado no SQL." });
-      return status;
-    }
+    const r = await fetch("/api/latest", { cache: "no-store" });
     if (!r.ok) {
       emitir({ estado: "indisponivel", detalhe: `HTTP ${r.status}` });
       return status;
     }
-    const lista = (await r.json()) as ReleaseRemota[];
-    const ultima = lista[0];
-    if (!ultima) {
-      emitir({ estado: "atualizado", remota: null, detalhe: `v${APP_VERSAO} · catálogo vazio` });
+    const ultima = (await r.json()) as LatestJson;
+    if (!ultima.version || !ultima.url) {
+      emitir({ estado: "atualizado", remota: null, detalhe: `v${APP_VERSAO} · sem catálogo` });
       return status;
     }
-    const url = urlArquivo(ultima);
-    if (!versaoMaior(ultima.versao, APP_VERSAO)) {
+    if (!versaoMaior(ultima.version, APP_VERSAO)) {
       emitir({
         estado: "atualizado",
-        remota: ultima.versao,
-        notas: ultima.notas,
-        url,
+        remota: ultima.version,
+        notas: ultima.notes ?? null,
+        url: ultima.url,
         detalhe: `v${APP_VERSAO} em dia`,
       });
       return status;
     }
-    if (ultima.obrigatoria) {
-      emitir({
-        estado: "obrigatoria",
-        remota: ultima.versao,
-        notas: ultima.notas,
-        url,
-        detalhe: `Atualização obrigatória ${ultima.versao}`,
-      });
-      return status;
-    }
-    if (dispensada(ultima.versao)) {
+    if (dispensada(ultima.version)) {
       emitir({
         estado: "atualizado",
-        remota: ultima.versao,
-        notas: ultima.notas,
-        url,
-        detalhe: `v${APP_VERSAO} (v${ultima.versao} oculta)`,
+        remota: ultima.version,
+        notas: ultima.notes ?? null,
+        url: ultima.url,
+        detalhe: `v${APP_VERSAO} (v${ultima.version} oculta)`,
       });
       return status;
     }
     emitir({
       estado: "disponivel",
-      remota: ultima.versao,
-      notas: ultima.notas,
-      url,
-      detalhe: `Nova versão ${ultima.versao}`,
+      remota: ultima.version,
+      notas: ultima.notes ?? null,
+      url: ultima.url,
+      detalhe: `Nova versão ${ultima.version}`,
     });
     return status;
   } catch (e) {
@@ -159,6 +128,19 @@ export async function checarUpdate(): Promise<StatusUpdate> {
     });
     return status;
   }
+}
+
+/** Confirmação do usuário. No Windows desktop instala em silêncio e reabre. No navegador, baixa o arquivo. */
+export async function confirmarAtualizacao(): Promise<void> {
+  const url = status.url;
+  if (!url) return;
+  const desktop = (window as unknown as { cfDesktop?: Desktop }).cfDesktop;
+  if (desktop?.ativo && desktop.aplicarAtualizacao && /^https:\/\//.test(url)) {
+    emitir({ estado: "baixando", detalhe: "Baixando e instalando…" });
+    await desktop.aplicarAtualizacao(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 export function iniciarChecagemUpdate(): void {

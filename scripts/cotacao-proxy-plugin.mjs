@@ -1,3 +1,4 @@
+import { lerLatest } from "../server/latest-release.mjs";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,20 @@ export function cotacaoProxyPlugin() {
           res.setHeader("content-length", String(st.size));
           res.setHeader("cache-control", "no-store");
           createReadStream(exe).pipe(res);
+          return;
+        }
+        if (pathOnly === "/api/latest") {
+          try {
+            const j = await lerLatest();
+            res.statusCode = 200;
+            res.setHeader("content-type", "application/json");
+            res.setHeader("cache-control", "no-store");
+            res.end(JSON.stringify(j));
+          } catch (err) {
+            res.statusCode = 502;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ error: err instanceof Error ? err.message : "latest" }));
+          }
           return;
         }
         if (pathOnly === "/proxy/tesouro") {

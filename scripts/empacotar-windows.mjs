@@ -140,7 +140,7 @@ function compilarSetup() {
   console.log("NSIS:", makensis, "versão app:", VERSAO);
   execFileSync(
     makensis,
-    [`-DSRC=${OUT_DIR}`, `-DOUT=${SETUP_TMP}`, NSI],
+    [`-DSRC=${OUT_DIR}`, `-DOUT=${SETUP_TMP}`, `-DAPPVER=${VERSAO}`, NSI],
     {
       stdio: "inherit",
       env: { ...process.env, NSISDIR: process.env.NSISDIR || "/tmp/nsis/usr/share/nsis" },

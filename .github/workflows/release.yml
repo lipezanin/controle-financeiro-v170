@@ -1,0 +1,60 @@
+# Publica o instalador Windows quando uma tag v* é enviada.
+# Ex.: git tag v2.0.1 && git push origin v2.0.1
+# Anexa ControleFinanceiro-Setup.exe e latest.json na Release.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  instalador:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: NSIS
+        run: sudo apt-get update && sudo apt-get install -y nsis
+
+      - name: Dependências
+        run: npm ci
+
+      - name: Compilar app e instalador
+        run: npm run build:desktop
+
+      - name: latest.json
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSAO="${TAG#v}"
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/ControleFinanceiro-Setup.exe"
+          python3 - <<PY
+          import json, pathlib
+          pathlib.Path("artifacts").mkdir(exist_ok=True)
+          pathlib.Path("artifacts/latest.json").write_text(json.dumps({
+            "version": "${VERSAO}",
+            "url": "${URL}",
+            "notes": "Instalador Windows ${VERSAO}",
+            "name": "ControleFinanceiro-Setup.exe",
+          }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+          cp -f artifacts/ControleFinanceiro-Setup-${VERSAO}.exe artifacts/ControleFinanceiro-Setup.exe
+
+      - name: Publicar na Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Controle Financeiro ${{ github.ref_name }}
+          files: |
+            artifacts/ControleFinanceiro-Setup.exe
+            artifacts/latest.json
+          generate_release_notes: true
