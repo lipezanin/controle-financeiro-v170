@@ -116,10 +116,16 @@ function baixarArquivo(url, dest) {
       reject(new Error("URL de atualização não permitida."));
       return;
     }
-    const req = net.request(url);
+    const req = net.request({
+      url,
+      redirect: "manual",
+    });
+    req.setHeader("User-Agent", "ControleFinanceiro");
+    req.setHeader("Accept", "application/octet-stream");
     req.on("response", (res) => {
       const codigo = res.statusCode || 0;
-      const loc = res.headers.location;
+      const locRaw = res.headers.location;
+      const loc = Array.isArray(locRaw) ? locRaw[0] : locRaw;
       if (codigo >= 300 && codigo < 400 && loc) {
         res.resume();
         const proxima = new URL(loc, url).href;
@@ -132,8 +138,24 @@ function baixarArquivo(url, dest) {
         return;
       }
       const arquivo = fs.createWriteStream(dest);
-      res.pipe(arquivo);
-      arquivo.on("finish", () => arquivo.close(() => resolve(dest)));
+      let bytes = 0;
+      let inicio = "";
+      res.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (inicio.length < 80) inicio += chunk.subarray(0, 80).toString("utf8");
+        arquivo.write(chunk);
+      });
+      res.on("end", () => {
+        arquivo.end(() => {
+          if (bytes < 1_000_000 || inicio.trim().startsWith("<") || inicio.trim().startsWith("{")) {
+            fs.rmSync(dest, { force: true });
+            reject(new Error("O arquivo baixado não é o instalador."));
+            return;
+          }
+          resolve(dest);
+        });
+      });
+      res.on("error", reject);
       arquivo.on("error", reject);
     });
     req.on("error", reject);
