@@ -22,11 +22,17 @@ type Desktop = {
   aplicarAtualizacao?: (url: string) => Promise<unknown>;
 };
 
+function versaoDesteApp(): string {
+  if (typeof window === "undefined") return APP_VERSAO;
+  const desktop = (window as unknown as { cfDesktop?: { versao?: string } }).cfDesktop;
+  return desktop?.versao || APP_VERSAO;
+}
+
 const DISMISS_KEY = "cf-update-dismiss";
 
 let status: StatusUpdate = {
   estado: "idle",
-  local: APP_VERSAO,
+  local: versaoDesteApp(),
   remota: null,
   notas: null,
   url: null,
@@ -77,7 +83,7 @@ function dispensada(versao: string): boolean {
 export function dispensarUpdate(versao: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(DISMISS_KEY, versao);
-  emitir({ estado: "atualizado", detalhe: `v${APP_VERSAO} (aviso oculto)` });
+  emitir({ estado: "atualizado", detalhe: `v${versaoDesteApp()} (aviso oculto)` });
 }
 
 export async function checarUpdate(): Promise<StatusUpdate> {
@@ -89,32 +95,36 @@ export async function checarUpdate(): Promise<StatusUpdate> {
       return status;
     }
     const ultima = (await r.json()) as LatestJson;
+    const local = versaoDesteApp();
     if (!ultima.version || !ultima.url) {
-      emitir({ estado: "atualizado", remota: null, detalhe: `v${APP_VERSAO} · sem catálogo` });
+      emitir({ estado: "atualizado", remota: null, detalhe: `v${local} · sem catálogo` });
       return status;
     }
-    if (!versaoMaior(ultima.version, APP_VERSAO)) {
+    if (!versaoMaior(ultima.version, local)) {
       emitir({
         estado: "atualizado",
+        local,
         remota: ultima.version,
         notas: ultima.notes ?? null,
         url: ultima.url,
-        detalhe: `v${APP_VERSAO} em dia`,
+        detalhe: `v${local} em dia`,
       });
       return status;
     }
     if (dispensada(ultima.version)) {
       emitir({
         estado: "atualizado",
+        local,
         remota: ultima.version,
         notas: ultima.notes ?? null,
         url: ultima.url,
-        detalhe: `v${APP_VERSAO} (v${ultima.version} oculta)`,
+        detalhe: `v${local} (v${ultima.version} oculta)`,
       });
       return status;
     }
     emitir({
       estado: "disponivel",
+      local,
       remota: ultima.version,
       notas: ultima.notes ?? null,
       url: ultima.url,
