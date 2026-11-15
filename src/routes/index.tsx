@@ -1,26 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Upload } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CardsClasse, GraficoAneis, GraficoDonut, GraficoEvolucaoPatrimonio } from "@/components/graficos-financeiro";
 import { KpiCard } from "@/components/kpi-card";
-import { BackupLocal } from "@/components/backup-local";
 import { SectionTitle } from "@/components/section-title";
 import { TabelaMensal } from "@/components/tabela-mensal";
-import { Button } from "@/components/ui/button";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useRecorteMercado } from "@/hooks/mercado-context";
 import { classeNoRecorte } from "@/lib/financeiro/mercado";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { formatBRL, formatPct } from "@/lib/financeiro/format";
-import { importarCotahist } from "@/services/cotacao-ativos-service";
 import { evolucaoPatrimonio, type PontoEvolucao } from "@/services/evolucao-patrimonio-service";
 import { listarCarteira, type Carteira } from "@/services/investimento-service";
 import { resumirPatrimonio, type ResumoPatrimonio } from "@/services/patrimonio-service";
 import { resumirRentabilidade, type Rentabilidade } from "@/services/rentabilidade-service";
 import { listarIndicadores, type Indicador } from "@/services/taxas-service";
-import { checarUpdate, onStatusUpdate } from "@/services/update-service";
-import { garantirImportacaoInicial, importarPlanilha, importarSeed } from "@/utils/import-excel";
+import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 export const Route = createFileRoute("/")({ component: Dashboard });
 
@@ -34,25 +29,6 @@ function Dashboard() {
   const [carteira, setCarteira] = useState<Carteira | null>(null);
   const [status, setStatus] = useState<"iniciando" | "pronto" | "erro">("iniciando");
   const [msg, setMsg] = useState("Preparando banco local");
-  const [busy, setBusy] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const cotahistRef = useRef<HTMLInputElement>(null);
-  const [instalador, setInstalador] = useState({
-    href: "/downloads/ControleFinanceiro-Setup.exe",
-    rotulo: "Baixar última versão",
-  });
-
-  useEffect(() => {
-    const aplicar = (url: string | null, versao: string | null) => {
-      if (!url) return;
-      setInstalador({
-        href: url,
-        rotulo: versao ? `Baixar instalador ${versao}` : "Baixar última versão",
-      });
-    };
-    void checarUpdate().then((s) => aplicar(s.url, s.remota));
-    return onStatusUpdate((s) => aplicar(s.url, s.remota));
-  }, []);
 
   const carregar = useCallback(async () => {
     try {
@@ -105,50 +81,11 @@ function Dashboard() {
     void carregar();
   });
 
-  async function recarregarSeed() {
-    setStatus("iniciando");
-    setMsg("Importando planilha 2.1…");
-    try {
-      await importarSeed();
-      await carregar();
-    } catch (err) {
-      setStatus("erro");
-      setMsg(err instanceof Error ? err.message : "Falha na importação");
-    }
-  }
-
-  async function onArquivo(f: File | undefined) {
-    if (!f) return;
-    setStatus("iniciando");
-    setMsg(`Lendo ${f.name}…`);
-    try {
-      await importarPlanilha(f);
-      await carregar();
-    } catch (err) {
-      setStatus("erro");
-      setMsg(err instanceof Error ? err.message : "Falha ao ler o arquivo");
-    }
-  }
-
-  async function onCotahist(f: File | undefined) {
-    if (!f) return;
-    setBusy("cotahist");
-    try {
-      const r = await importarCotahist(f);
-      setMsg(`COTAHIST: ${r.gravados} tickers`);
-      await carregar();
-    } catch (err) {
-      setMsg(err instanceof Error ? err.message : "Falha no COTAHIST");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   const r = resumo;
   const composicao = useMemo(
     () =>
       (carteira?.variacaoGrupos ?? [])
-        .filter((g) => classeNoRecorte(recorte, g.grupo))
+        .filter((g) => g.grupo !== "Imóveis" && classeNoRecorte(recorte, g.grupo))
         .map((g) => ({ classe: g.grupo, valor: g.valor })),
     [carteira, recorte],
   );
@@ -158,55 +95,13 @@ function Dashboard() {
       <SectionTitle
         kicker="Início"
         title="01 — Investimentos · Visão geral"
-        description="Cards e composição com as mesmas regras da planilha 2.1. Dados ficam só neste navegador."
+        description="Cards e composição da carteira. Importação e instalador ficam em Manutenção."
       />
 
-      <div className="mb-6 rounded-[10px] border border-accent/40 bg-card p-4">
-        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-accent">Instalador Windows</p>
-        <p className="mt-1 text-sm text-muted">
-          Assistente em português: instala em C:\Arquivos de Programas\Controle Financeiro,
-          atalho na Área de trabalho e desinstalador. Desinstale a versão antiga antes de instalar.
-        </p>
-        <a
-          href={instalador.href}
-          download="ControleFinanceiro-Setup.exe"
-          target="_blank"
-          rel="noreferrer"
-          className="mt-3 inline-flex h-10 items-center rounded-[8px] bg-accent px-4 text-sm font-medium text-accent-fg hover:opacity-90"
-        >
-          {instalador.rotulo}
-        </a>
-      </div>
-
-      <div className="mb-6 flex flex-wrap items-center gap-2">
+      <div className="mb-6">
         <StatusChip
           ok={status === "pronto"}
           texto={status === "erro" ? msg : status === "pronto" ? msg : "Carregando…"}
-        />
-        <Button variant="secondary" size="sm" onClick={() => void recarregarSeed()}>
-          Recarregar 2.1
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>
-          <Upload className="size-3.5" />
-          Importar Excel
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => cotahistRef.current?.click()}>
-          COTAHIST B3
-        </Button>
-        <BackupLocal onRestaurado={() => void carregar()} />
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx,.xlsm,.xls"
-          className="hidden"
-          onChange={(e) => void onArquivo(e.target.files?.[0])}
-        />
-        <input
-          ref={cotahistRef}
-          type="file"
-          accept=".txt,.TXT,.zip,.ZIP"
-          className="hidden"
-          onChange={(e) => void onCotahist(e.target.files?.[0])}
         />
       </div>
 

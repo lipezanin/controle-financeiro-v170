@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { CampoValor } from "@/components/campo-valor";
 import { Button } from "@/components/ui/button";
 import { formatBRL, formatData } from "@/lib/financeiro/format";
@@ -37,6 +38,7 @@ export function ConferenciaCaixaPainel({
   const [editData, setEditData] = useState("");
   const [editContado, setEditContado] = useState("");
   const [editObs, setEditObs] = useState("");
+  const ordem = useOrdenacao<"data" | "sistema" | "contado" | "dif" | "ajuste" | "obs">("data");
 
   const carregar = useCallback(async () => {
     setLista(await listarConferencias());
@@ -51,6 +53,14 @@ export function ConferenciaCaixaPainel({
     void carregar().catch(() => undefined);
   });
 
+  const linhas = ordem.ordenar(lista, (c, k) => {
+    if (k === "data") return c.data;
+    if (k === "sistema") return c.saldoSistema;
+    if (k === "contado") return c.saldoContado;
+    if (k === "dif") return c.diferenca;
+    if (k === "ajuste") return c.ajustouLivro ? 1 : 0;
+    return c.observacao ?? "";
+  });
   const valorContado = parseNumeroBR(contado);
   const diff = contado ? valorContado - sistema : 0;
 
@@ -151,12 +161,12 @@ export function ConferenciaCaixaPainel({
         <table className="zebra min-w-[720px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-              <th className="px-3 py-2.5">Data</th>
-              <th className="px-3 py-2.5 text-right">Sistema</th>
-              <th className="px-3 py-2.5 text-right">Contado</th>
-              <th className="px-3 py-2.5 text-right">Diferença</th>
-              <th className="px-3 py-2.5">Ajuste</th>
-              <th className="px-3 py-2.5">Obs.</th>
+              <th className="px-3 py-2.5"><button type="button" onClick={() => ordem.toggle("data")}>Data{rotuloOrdem(ordem.chave === "data", ordem.dir)}</button></th>
+              <th className="px-3 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("sistema")}>Sistema{rotuloOrdem(ordem.chave === "sistema", ordem.dir)}</button></th>
+              <th className="px-3 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("contado")}>Contado{rotuloOrdem(ordem.chave === "contado", ordem.dir)}</button></th>
+              <th className="px-3 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("dif")}>Diferença{rotuloOrdem(ordem.chave === "dif", ordem.dir)}</button></th>
+              <th className="px-3 py-2.5"><button type="button" onClick={() => ordem.toggle("ajuste")}>Ajuste{rotuloOrdem(ordem.chave === "ajuste", ordem.dir)}</button></th>
+              <th className="px-3 py-2.5"><button type="button" onClick={() => ordem.toggle("obs")}>Obs.{rotuloOrdem(ordem.chave === "obs", ordem.dir)}</button></th>
               <th className="px-3 py-2.5" />
             </tr>
           </thead>
@@ -168,7 +178,7 @@ export function ConferenciaCaixaPainel({
                 </td>
               </tr>
             ) : (
-              lista.map((c) => (
+              linhas.map((c) => (
                 <tr key={c.id}>
                   {editId === c.id ? (
                     <td colSpan={7} className="px-3 py-2">

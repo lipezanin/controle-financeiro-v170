@@ -3,7 +3,8 @@
  * Números no padrão BR (1.234,56).
  */
 
-import { consultar, executar, getDb, salvarDb } from "@/lib/financeiro/db";
+import { consultar, executar, getDb, salvarDb, apagarComTombstone } from "@/lib/financeiro/db";
+import { CATEGORIA_IMOVEL, ehImovel, ehSaidaImovel } from "@/lib/financeiro/imovel";
 import { reconstruirPosicoes } from "@/utils/import-excel";
 import { parseNumeroBR } from "@/utils/numeros-br";
 
@@ -35,37 +36,45 @@ export type TxInput = {
 export async function lancarTransacao(input: TxInput): Promise<void> {
   const db = await getDb();
   const ticker = input.ticker.trim().toUpperCase();
-  const qtd = Math.abs(parseNumeroBR(input.quantidade));
+  const imovel = ehImovel(input.categoria);
+  const tipo = imovel && input.tipo === "Venda" ? "Venda de imóvel" : imovel && input.tipo === "Doação realizada" ? "Doação de imóvel" : input.tipo;
+  const qtd = imovel ? 1 : Math.abs(parseNumeroBR(input.quantidade));
   const valor = Math.abs(parseNumeroBR(input.valorBrl));
   const taxas = Math.abs(parseNumeroBR(input.taxas ?? 0));
-  if (!input.data || !ticker || !qtd || !valor) {
+  if (!input.data || !ticker || !valor || (!imovel && !qtd)) {
     throw new Error("Informe data, ticker, quantidade e valor (aceita 1.234,56).");
   }
+  const categoria = imovel ? CATEGORIA_IMOVEL : input.categoria;
   const last = consultar(
     db,
     `SELECT qtd_acumulada AS qtd, custo_acum_brl AS custo, custo_acum_usd AS custo_usd
      FROM transacoes
-     WHERE UPPER(ticker) = ? AND categoria = ? ORDER BY id DESC LIMIT 1`,
-    [ticker, input.categoria],
+     WHERE UPPER(ticker) = ? AND (categoria = ? OR (? = 'Imóveis' AND categoria = 'Imóvel'))
+     ORDER BY id DESC LIMIT 1`,
+    [ticker, categoria],
   )[0];
   const qtdAnt = num(last?.qtd);
   const custoAnt = num(last?.custo);
   const custoUsdAnt = num(last?.custo_usd);
-  const compra =
-    input.tipo === "Compra" || input.tipo === "Parcela Imóvel" || input.tipo === "ITBI / Cartório";
-  const venda = input.tipo === "Venda";
-  const valorCusto = compra ? valor + taxas : valor;
+  const saidaImovel = imovel && ehSaidaImovel(tipo);
+  const compra = !imovel && (tipo === "Compra" || tipo === "Parcela Imóvel" || tipo === "ITBI / Cartório");
+  const venda = !imovel && tipo === "Venda";
+  const valorCusto = imovel ? valor + taxas : compra ? valor + taxas : valor;
   const usd = Math.abs(parseNumeroBR(input.valorUsd ?? 0));
   const iof = Math.abs(parseNumeroBR(input.iofBrl ?? 0));
   const spread = Math.abs(parseNumeroBR(input.spreadBrl ?? 0));
   const fx = parseNumeroBR(input.cotacaoEfetiva ?? 0);
   const ptax = parseNumeroBR(input.cotacaoPtax ?? 0);
-  const qtdNova = compra ? qtdAnt + qtd : venda ? qtdAnt - qtd : qtdAnt;
-  const custoNovo = compra
-    ? custoAnt + valorCusto
-    : venda && qtdAnt
-      ? custoAnt * (qtdNova / qtdAnt)
-      : custoAnt;
+  const qtdNova = imovel ? (saidaImovel ? 0 : 1) : compra ? qtdAnt + qtd : venda ? qtdAnt - qtd : qtdAnt;
+  const custoNovo = imovel
+    ? saidaImovel
+      ? 0
+      : custoAnt + valorCusto
+    : compra
+      ? custoAnt + valorCusto
+      : venda && qtdAnt
+        ? custoAnt * (qtdNova / qtdAnt)
+        : custoAnt;
   const custoUsdNovo = compra
     ? custoUsdAnt + usd
     : venda && qtdAnt
@@ -73,10 +82,32 @@ export async function lancarTransacao(input: TxInput): Promise<void> {
       : custoUsdAnt;
   const pm = qtdNova > 0 ? custoNovo / qtdNova : null;
   const pmUsd = qtdNova > 0 && custoUsdNovo > 0 ? custoUsdNovo / qtdNova : null;
-  const gc = venda && qtdAnt ? valor - taxas - (custoAnt / qtdAnt) * qtd : null;
+  const gc = imovel
+    ? saidaImovel
+      ? valor - taxas - custoAnt
+      : null
+    : venda && qtdAnt
+      ? valor - taxas - (custoAnt / qtdAnt) * qtd
+      : null;
   const gcOrig = venda && qtdAnt && usd > 0 ? usd - (custoUsdAnt / qtdAnt) * qtd : null;
   const gcCambial =
     gc != null && gcOrig != null && fx > 0 ? gc - gcOrig * fx : null;
+  const valorGravado = compra ? valorCusto : valor;
+  const notaGravada = input.nota?.trim() || "";
+  const igual = consultar(
+    db,
+    `SELECT id FROM transacoes
+     WHERE substr(COALESCE(data,''),1,10) = substr(?,1,10)
+       AND tipo_operacao = ?
+       AND UPPER(COALESCE(ticker,'')) = ?
+       AND ABS(ROUND(COALESCE(valor_brl,0),2) - ROUND(?,2)) < 0.02
+       AND COALESCE(nota,'') = ?
+     LIMIT 1`,
+    [input.data, tipo, ticker, valorGravado, notaGravada],
+  );
+  if (igual.length) {
+    throw new Error("Já existe um lançamento igual nesta data, com o mesmo tipo, ativo e valor.");
+  }
   executar(
     db,
     `INSERT INTO transacoes (
@@ -89,10 +120,10 @@ export async function lancarTransacao(input: TxInput): Promise<void> {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.data,
-      input.tipo,
-      input.categoria,
+      tipo,
+      categoria,
       ticker,
-      qtd,
+      imovel ? (saidaImovel ? 1 : 0) : qtd,
       compra ? valorCusto : valor,
       input.moeda ?? (usd > 0 ? "USD" : "BRL"),
       input.origem ?? (usd > 0 ? "Internacional" : "Nacional"),
@@ -117,6 +148,13 @@ export async function lancarTransacao(input: TxInput): Promise<void> {
       pmUsd,
     ],
   );
+  if (imovel && saidaImovel) {
+    executar(
+      db,
+      `UPDATE transacoes SET classif_irpfm = 'Excluído do limite', forma_recolhimento = 'DARF'
+       WHERE id = last_insert_rowid()`,
+    );
+  }
   if (!input._adiar) {
     reconstruirPosicoes(db);
     await salvarDb();
@@ -196,6 +234,8 @@ export type CabecalhoNotaIntl = {
   iofBrl?: number | string;
   spreadBrl?: number | string;
   cotacaoPtax?: number | string;
+  /** caixa = usa o dólar já comprado. nota = conversão informada neste lançamento. */
+  fonte?: "caixa" | "nota";
 };
 
 export type OrdemNotaIntl = {
@@ -213,7 +253,6 @@ export async function lancarNotaInternacional(
   ordens: OrdemNotaIntl[],
 ): Promise<{ n: number; cotacaoEfetiva: number; custoTotalBrl: number }> {
   if (!cab.data) throw new Error("Informe a data da nota.");
-  const brl = parseNumeroBR(cab.valorInvestidoBrl);
   const iof = parseNumeroBR(cab.iofBrl);
   const spread = parseNumeroBR(cab.spreadBrl);
   const ptax = parseNumeroBR(cab.cotacaoPtax);
@@ -228,9 +267,68 @@ export async function lancarNotaInternacional(
     }))
     .filter((o) => o.ticker && o.qtd > 0 && o.usd > 0);
   if (!lista.length) throw new Error("Informe ao menos uma ordem (ticker, quantidade e valor em USD).");
-  if (brl <= 0) throw new Error("Informe o valor investido em R$ da conversão.");
   const somaUsd = lista.reduce((a, o) => a + o.usd, 0);
   if (somaUsd <= 0) throw new Error("A soma em USD das ordens precisa ser maior que zero.");
+
+  if (cab.fonte === "caixa") {
+    const { consumirMoeda, creditarMoeda } = await import("@/services/caixa-cambio-service");
+    const compras = lista.filter((o) => o.tipo !== "Venda");
+    const vendas = lista.filter((o) => o.tipo === "Venda");
+    const usdCompra = compras.reduce((a, o) => a + o.usd, 0);
+    const usdVenda = vendas.reduce((a, o) => a + o.usd, 0);
+    let pm = 0;
+    if (usdCompra > 0) {
+      const uso = await consumirMoeda({
+        data: cab.data,
+        quantidade: usdCompra,
+        descricao: `Nota ${cab.numeroNota || ""}`.trim(),
+      });
+      pm = uso.cotacao;
+    }
+    let ptax = parseNumeroBR(cab.cotacaoPtax);
+    if (usdVenda > 0) {
+      if (ptax <= 0) {
+        const { dolarNaData } = await import("@/services/cambio-service");
+        ptax = (await dolarNaData(cab.data))?.venda ?? 0;
+      }
+      if (ptax <= 0) throw new Error("Sem PTAX para lançar a venda de volta no caixa em dólar.");
+      await creditarMoeda({
+        data: cab.data,
+        quantidade: usdVenda,
+        custoBrl: usdVenda * ptax,
+        descricao: `Venda na nota ${cab.numeroNota || ""}`.trim(),
+      });
+    }
+    for (const o of lista) {
+      const venda = o.tipo === "Venda";
+      const cotacao = venda ? ptax : pm;
+      await lancarTransacao({
+        data: cab.data,
+        tipo: o.tipo,
+        categoria: o.categoria,
+        ticker: o.ticker,
+        quantidade: o.qtd,
+        valorBrl: o.usd * cotacao,
+        valorUsd: o.usd,
+        taxas: 0,
+        nota: cab.numeroNota || undefined,
+        moeda: "USD",
+        origem: "Internacional",
+        instituicao: cab.instituicao,
+        liquidez: o.liquidez,
+        cotacaoEfetiva: cotacao,
+        cotacaoPtax: ptax,
+        _adiar: true,
+      });
+    }
+    const db = await getDb();
+    reconstruirPosicoes(db);
+    await salvarDb();
+    return { n: lista.length, cotacaoEfetiva: pm || ptax, custoTotalBrl: usdCompra * pm };
+  }
+
+  const brl = parseNumeroBR(cab.valorInvestidoBrl);
+  if (brl <= 0) throw new Error("Informe o valor investido em R$ da conversão.");
   const cotacaoEfetiva = brl / somaUsd;
   const custoTotalBrl = brl + iof + spread;
   for (const o of lista) {
@@ -297,6 +395,7 @@ export async function lancarExtratoInternacional(
     const brutoBrl = l.usd * fx;
     const ir = l.wh * fx;
     const liquido = Math.max(0, brutoBrl - ir);
+    const usdLiquido = Math.max(0, l.usd - l.wh);
     executar(
       db,
       `INSERT INTO rendimentos (
@@ -318,6 +417,15 @@ export async function lancarExtratoInternacional(
         l.descricao,
       ],
     );
+    if (usdLiquido > 0) {
+      const { creditarMoeda } = await import("@/services/caixa-cambio-service");
+      await creditarMoeda({
+        data: l.data,
+        quantidade: usdLiquido,
+        custoBrl: usdLiquido * fx,
+        descricao: l.ticker ? `Provento ${l.ticker}` : "Provento em dólar",
+      });
+    }
   }
   await salvarDb();
   return lista.length;
@@ -601,7 +709,9 @@ export async function listarDespesas(limite = 400): Promise<LinhaDespesa[]> {
   return consultar(
     db,
     `SELECT id, data_vencimento AS vencimento, categoria, descricao, valor, data_pagamento AS pagamento, situacao
-     FROM despesas ORDER BY data_vencimento DESC, id DESC LIMIT ?`,
+     FROM despesas
+     WHERE deleted_at IS NULL OR TRIM(deleted_at) = ''
+     ORDER BY data_vencimento DESC, id DESC LIMIT ?`,
     [limite],
   ).map((r) => ({
     id: num(r.id),
@@ -662,14 +772,15 @@ export async function atualizarTransacao(
 export async function excluirTransacoes(ids: number[]): Promise<void> {
   if (!ids.length) return;
   const db = await getDb();
-  executar(db, `DELETE FROM transacoes WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  apagarComTombstone(db, "transacoes", ids);
   reconstruirPosicoes(db);
   await salvarDb();
 }
 
 export async function excluirTodasTransacoes(): Promise<void> {
   const db = await getDb();
-  executar(db, `DELETE FROM transacoes`);
+  const ids = consultar(db, `SELECT id FROM transacoes`).map((r) => Number(r.id));
+  apagarComTombstone(db, "transacoes", ids);
   reconstruirPosicoes(db);
   await salvarDb();
 }
@@ -705,13 +816,14 @@ export async function atualizarDespesa(
 export async function excluirDespesas(ids: number[]): Promise<void> {
   if (!ids.length) return;
   const db = await getDb();
-  executar(db, `DELETE FROM despesas WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  apagarComTombstone(db, "despesas", ids);
   await salvarDb();
 }
 
 export async function excluirTodasDespesas(): Promise<void> {
   const db = await getDb();
-  executar(db, `DELETE FROM despesas`);
+  const ids = consultar(db, `SELECT id FROM despesas`).map((r) => Number(r.id));
+  apagarComTombstone(db, "despesas", ids);
   await salvarDb();
 }
 
@@ -732,13 +844,14 @@ export async function atualizarRendimento(
 export async function excluirRendimentos(ids: number[]): Promise<void> {
   if (!ids.length) return;
   const db = await getDb();
-  executar(db, `DELETE FROM rendimentos WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  apagarComTombstone(db, "rendimentos", ids);
   await salvarDb();
 }
 
 export async function excluirTodosRendimentos(): Promise<void> {
   const db = await getDb();
-  executar(db, `DELETE FROM rendimentos`);
+  const ids = consultar(db, `SELECT id FROM rendimentos`).map((r) => Number(r.id));
+  apagarComTombstone(db, "rendimentos", ids);
   await salvarDb();
 }
 

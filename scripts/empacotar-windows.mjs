@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { execFileSync, execSync } from "node:child_process";
+import { gerarDelta } from "./gerar-delta.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ELECTRON_VERSION = "34.5.8";
@@ -31,6 +32,16 @@ const ZIP_E = join(CACHE, `electron-v${ELECTRON_VERSION}-win32-x64.zip`);
 const URL_E = `https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/electron-v${ELECTRON_VERSION}-win32-x64.zip`;
 const NSI = join(ROOT, "scripts", "instalador-windows.nsi");
 const VERSAO = JSON.parse(readFileSync(join(ROOT, "desktop", "package.json"), "utf8")).version;
+
+/** 2.0.008 vira 2.0.8.0. O Windows não aceita zero à esquerda no número interno do arquivo. */
+function versaoArquivoWindows(v) {
+  const partes = String(v)
+    .replace(/^v/i, "")
+    .split(".")
+    .map((p) => String(Number.parseInt(p, 10) || 0));
+  while (partes.length < 4) partes.push("0");
+  return partes.slice(0, 4).join(".");
+}
 
 function acharOutput() {
   const c = join(ROOT, ".output");
@@ -104,6 +115,7 @@ function montarApp(output) {
   execSync(`tar -C ${JSON.stringify(output)} -cf - . | tar -C ${JSON.stringify(destOut)} -xf -`, {
     stdio: "inherit",
   });
+  rmSync(join(destOut, "public", "downloads"), { recursive: true, force: true });
 
   writeFileSync(
     join(OUT_DIR, "LEIA-ME.txt"),
@@ -128,11 +140,7 @@ function montarApp(output) {
 function copiarInstaladores() {
   const versaoPath = join(ROOT, "artifacts", `ControleFinanceiro-Setup-${VERSAO}.exe`);
   cpSync(SETUP_PATH, versaoPath);
-  const pub = join(ROOT, "public", "downloads", "ControleFinanceiro-Setup.exe");
-  mkdirSync(dirname(pub), { recursive: true });
-  cpSync(SETUP_PATH, pub);
   console.log("cópia:", versaoPath);
-  console.log("cópia:", pub);
 }
 
 function compilarSetup() {
@@ -140,7 +148,7 @@ function compilarSetup() {
   console.log("NSIS:", makensis, "versão app:", VERSAO);
   execFileSync(
     makensis,
-    [`-DSRC=${OUT_DIR}`, `-DOUT=${SETUP_TMP}`, `-DAPPVER=${VERSAO}`, NSI],
+    [`-DSRC=${OUT_DIR}`, `-DOUT=${SETUP_TMP}`, `-DAPPVER=${VERSAO}`, `-DAPPVERNUM=${versaoArquivoWindows(VERSAO)}`, NSI],
     {
       stdio: "inherit",
       env: { ...process.env, NSISDIR: process.env.NSISDIR || "/tmp/nsis/usr/share/nsis" },
@@ -165,6 +173,26 @@ async function main() {
   console.log("nitro output:", output);
   await baixar(URL_E, ZIP_E);
   montarApp(output);
+  const delta = gerarDelta(OUT_DIR, VERSAO, join(ROOT, "artifacts"));
+  const tag = `v${VERSAO}`;
+  const base = `https://github.com/lipezanin/controle-financeiro-v170/releases/download/${tag}`;
+  writeFileSync(
+    join(ROOT, "artifacts", "latest.json"),
+    JSON.stringify(
+      {
+        version: VERSAO,
+        url: `${base}/ControleFinanceiro-Setup-${VERSAO}.exe`,
+        notes: "Atualização parcial: só os arquivos que mudaram.",
+        name: `ControleFinanceiro-Setup-${VERSAO}.exe`,
+        delta:
+          delta.from && delta.count && delta.bytes > 0 && delta.bytes < 120_000_000
+            ? { from: delta.from, url: `${base}/${delta.nome}`, bytes: delta.bytes, files: delta.count }
+            : null,
+      },
+      null,
+      2,
+    ) + "\n",
+  );
   compilarSetup();
 }
 

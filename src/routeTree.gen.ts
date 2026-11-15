@@ -11,14 +11,19 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CaixaRouteImport } from './routes/caixa'
+import { Route as CambioRouteImport } from './routes/cambio'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
+import { Route as ImoveisRouteImport } from './routes/imoveis'
 import { Route as InvestimentosRouteImport } from './routes/investimentos'
 import { Route as IrpfRouteImport } from './routes/irpf'
 import { Route as LancamentosRouteImport } from './routes/lancamentos'
+import { Route as ManutencaoRouteImport } from './routes/manutencao'
+import { Route as MetasRouteImport } from './routes/metas'
 import { Route as PatrimonioRouteImport } from './routes/patrimonio'
 import { Route as ProventosRouteImport } from './routes/proventos'
 import { Route as RendaFixaRouteImport } from './routes/renda-fixa'
+import { Route as TransacoesRouteImport } from './routes/transacoes'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -30,6 +35,11 @@ const CaixaRoute = CaixaRouteImport.update({
   path: '/caixa',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CambioRoute = CambioRouteImport.update({
+  id: '/cambio',
+  path: '/cambio',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
   id: '/configuracoes',
   path: '/configuracoes',
@@ -38,6 +48,11 @@ const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
 const FinanceiroRoute = FinanceiroRouteImport.update({
   id: '/financeiro',
   path: '/financeiro',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ImoveisRoute = ImoveisRouteImport.update({
+  id: '/imoveis',
+  path: '/imoveis',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvestimentosRoute = InvestimentosRouteImport.update({
@@ -55,6 +70,16 @@ const LancamentosRoute = LancamentosRouteImport.update({
   path: '/lancamentos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ManutencaoRoute = ManutencaoRouteImport.update({
+  id: '/manutencao',
+  path: '/manutencao',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetasRoute = MetasRouteImport.update({
+  id: '/metas',
+  path: '/metas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PatrimonioRoute = PatrimonioRouteImport.update({
   id: '/patrimonio',
   path: '/patrimonio',
@@ -70,94 +95,134 @@ const RendaFixaRoute = RendaFixaRouteImport.update({
   path: '/renda-fixa',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TransacoesRoute = TransacoesRouteImport.update({
+  id: '/transacoes',
+  path: '/transacoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/caixa': typeof CaixaRoute
+  '/cambio': typeof CambioRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/financeiro': typeof FinanceiroRoute
+  '/imoveis': typeof ImoveisRoute
   '/investimentos': typeof InvestimentosRoute
   '/irpf': typeof IrpfRoute
   '/lancamentos': typeof LancamentosRoute
+  '/manutencao': typeof ManutencaoRoute
+  '/metas': typeof MetasRoute
   '/patrimonio': typeof PatrimonioRoute
   '/proventos': typeof ProventosRoute
   '/renda-fixa': typeof RendaFixaRoute
+  '/transacoes': typeof TransacoesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/caixa': typeof CaixaRoute
+  '/cambio': typeof CambioRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/financeiro': typeof FinanceiroRoute
+  '/imoveis': typeof ImoveisRoute
   '/investimentos': typeof InvestimentosRoute
   '/irpf': typeof IrpfRoute
   '/lancamentos': typeof LancamentosRoute
+  '/manutencao': typeof ManutencaoRoute
+  '/metas': typeof MetasRoute
   '/patrimonio': typeof PatrimonioRoute
   '/proventos': typeof ProventosRoute
   '/renda-fixa': typeof RendaFixaRoute
+  '/transacoes': typeof TransacoesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/caixa': typeof CaixaRoute
+  '/cambio': typeof CambioRoute
   '/configuracoes': typeof ConfiguracoesRoute
   '/financeiro': typeof FinanceiroRoute
+  '/imoveis': typeof ImoveisRoute
   '/investimentos': typeof InvestimentosRoute
   '/irpf': typeof IrpfRoute
   '/lancamentos': typeof LancamentosRoute
+  '/manutencao': typeof ManutencaoRoute
+  '/metas': typeof MetasRoute
   '/patrimonio': typeof PatrimonioRoute
   '/proventos': typeof ProventosRoute
   '/renda-fixa': typeof RendaFixaRoute
+  '/transacoes': typeof TransacoesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/caixa'
+    | '/cambio'
     | '/configuracoes'
     | '/financeiro'
+    | '/imoveis'
     | '/investimentos'
     | '/irpf'
     | '/lancamentos'
+    | '/manutencao'
+    | '/metas'
     | '/patrimonio'
     | '/proventos'
     | '/renda-fixa'
+    | '/transacoes'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/caixa'
+    | '/cambio'
     | '/configuracoes'
     | '/financeiro'
+    | '/imoveis'
     | '/investimentos'
     | '/irpf'
     | '/lancamentos'
+    | '/manutencao'
+    | '/metas'
     | '/patrimonio'
     | '/proventos'
     | '/renda-fixa'
+    | '/transacoes'
   id:
     | '__root__'
     | '/'
     | '/caixa'
+    | '/cambio'
     | '/configuracoes'
     | '/financeiro'
+    | '/imoveis'
     | '/investimentos'
     | '/irpf'
     | '/lancamentos'
+    | '/manutencao'
+    | '/metas'
     | '/patrimonio'
     | '/proventos'
     | '/renda-fixa'
+    | '/transacoes'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CaixaRoute: typeof CaixaRoute
+  CambioRoute: typeof CambioRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
   FinanceiroRoute: typeof FinanceiroRoute
+  ImoveisRoute: typeof ImoveisRoute
   InvestimentosRoute: typeof InvestimentosRoute
   IrpfRoute: typeof IrpfRoute
   LancamentosRoute: typeof LancamentosRoute
+  ManutencaoRoute: typeof ManutencaoRoute
+  MetasRoute: typeof MetasRoute
   PatrimonioRoute: typeof PatrimonioRoute
   ProventosRoute: typeof ProventosRoute
   RendaFixaRoute: typeof RendaFixaRoute
+  TransacoesRoute: typeof TransacoesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -176,6 +241,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CaixaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cambio': {
+      id: '/cambio'
+      path: '/cambio'
+      fullPath: '/cambio'
+      preLoaderRoute: typeof CambioRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/configuracoes': {
       id: '/configuracoes'
       path: '/configuracoes'
@@ -188,6 +260,13 @@ declare module '@tanstack/react-router' {
       path: '/financeiro'
       fullPath: '/financeiro'
       preLoaderRoute: typeof FinanceiroRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/imoveis': {
+      id: '/imoveis'
+      path: '/imoveis'
+      fullPath: '/imoveis'
+      preLoaderRoute: typeof ImoveisRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/investimentos': {
@@ -211,6 +290,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LancamentosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/manutencao': {
+      id: '/manutencao'
+      path: '/manutencao'
+      fullPath: '/manutencao'
+      preLoaderRoute: typeof ManutencaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metas': {
+      id: '/metas'
+      path: '/metas'
+      fullPath: '/metas'
+      preLoaderRoute: typeof MetasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/patrimonio': {
       id: '/patrimonio'
       path: '/patrimonio'
@@ -232,20 +325,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RendaFixaRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/transacoes': {
+      id: '/transacoes'
+      path: '/transacoes'
+      fullPath: '/transacoes'
+      preLoaderRoute: typeof TransacoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CaixaRoute: CaixaRoute,
+  CambioRoute: CambioRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
   FinanceiroRoute: FinanceiroRoute,
+  ImoveisRoute: ImoveisRoute,
   InvestimentosRoute: InvestimentosRoute,
   IrpfRoute: IrpfRoute,
   LancamentosRoute: LancamentosRoute,
+  ManutencaoRoute: ManutencaoRoute,
+  MetasRoute: MetasRoute,
   PatrimonioRoute: PatrimonioRoute,
   ProventosRoute: ProventosRoute,
   RendaFixaRoute: RendaFixaRoute,
+  TransacoesRoute: TransacoesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { useRecorteMercado } from "@/hooks/mercado-context";
 import { passaRecorte } from "@/lib/financeiro/mercado";
-import { listarRendaFixa, resgatarTituloRf, type ResumoRf, type TituloRf } from "@/services/renda-fixa-service";
-import { parseNumeroBR } from "@/utils/numeros-br";
+import { atualizarTituloRf, excluirTituloRf, listarRendaFixa, resgatarParcialTituloRf, resgatarTituloRf, simularResgateParcial, type ResumoRf, type TituloRf } from "@/services/renda-fixa-service";
+import { formatNumeroBR, parseNumeroBR } from "@/utils/numeros-br";
 
 export const Route = createFileRoute("/renda-fixa")({
   component: Pagina,
@@ -29,6 +29,7 @@ function formatTaxa(indexador: string | null, taxa: number | null): string {
 function campoRf(t: TituloRf, c: string): unknown {
   const mapa: Record<string, unknown> = {
     tipo: t.tipoRf,
+    ticker: t.ticker ?? t.nome,
     emissor: t.emissor,
     indexador: t.indexador,
     taxa: t.taxa,
@@ -41,6 +42,8 @@ function campoRf(t: TituloRf, c: string): unknown {
     renta: t.rentabilidade,
     dias: t.diasCorridos,
     faltam: t.diasFaltantes,
+    ir: t.irAteAgora,
+    iof: t.iofAteAgora,
     liquido: t.valorLiquido,
     rentLiq: t.rentabilidadeLiquida,
     carga: t.cargaTributaria,
@@ -59,6 +62,11 @@ function Pagina() {
   const [liqValor, setLiqValor] = useState("");
   const [liqIr, setLiqIr] = useState("");
   const [liqMsg, setLiqMsg] = useState<string | null>(null);
+  const [resgId, setResgId] = useState<number | null>(null);
+  const [resgData, setResgData] = useState("");
+  const [resgBruto, setResgBruto] = useState("");
+  const [edit, setEdit] = useState<TituloRf | null>(null);
+  const [editValor, setEditValor] = useState("");
 
   const carregar = useCallback(async () => {
     try {
@@ -134,7 +142,7 @@ function Pagina() {
         <table className="zebra min-w-[1680px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-              <th className="sticky left-0 bg-surface-2 px-3 py-2.5">Ticker / nome</th>
+              <ThSort label="Ticker / nome" campo="ticker" atual={campo} dir={dir} onClick={clicar} className="sticky left-0 bg-surface-2" />
               <ThSort label="Tipo" campo="tipo" atual={campo} dir={dir} onClick={clicar} />
               <ThSort label="Emissor" campo="emissor" atual={campo} dir={dir} onClick={clicar} />
               <ThSort label="Indexador" campo="indexador" atual={campo} dir={dir} onClick={clicar} />
@@ -148,8 +156,8 @@ function Pagina() {
               <ThSort label="Renta bruta" campo="renta" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Dias" campo="dias" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Faltam" campo="faltam" atual={campo} dir={dir} onClick={clicar} align="right" />
-              <th className="px-2 py-2.5 text-right">IR até hoje</th>
-              <th className="px-2 py-2.5 text-right">IOF até hoje</th>
+              <ThSort label="IR até hoje" campo="ir" atual={campo} dir={dir} onClick={clicar} align="right" />
+              <ThSort label="IOF até hoje" campo="iof" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Líquido hoje" campo="liquido" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Renta líq." campo="rentLiq" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Carga trib." campo="carga" atual={campo} dir={dir} onClick={clicar} align="right" />
@@ -195,7 +203,34 @@ function Pagina() {
                 <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(t.valorLiquido)}</td>
                 <td className="px-2 py-2 text-right font-mono tabular">{formatPct(t.rentabilidadeLiquida, 2)}</td>
                 <td className="px-2 py-2 text-right font-mono tabular text-warn">{formatPct(t.cargaTributaria, 2)}</td>
-                <td className="px-2 py-2">
+                <td className="px-2 py-2 whitespace-nowrap">
+                  <button
+                    type="button"
+                    className="mr-2 text-accent"
+                    onClick={() => {
+                      setEdit(t);
+                      setEditValor(formatNumeroBR(t.valorAplicado));
+                    }}
+                  >
+                    Editar
+                  </button>
+                  <button type="button" className="mr-2 text-loss" onClick={() => void excluirTituloRf(t.id).then(carregar)}>
+                    Excluir
+                  </button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setResgId(t.id);
+                      setLiqId(null);
+                      setResgData(new Date().toISOString().slice(0, 10));
+                      setResgBruto("");
+                      setLiqMsg(null);
+                    }}
+                  >
+                    Resgate
+                  </Button>
                   <Button
                     type="button"
                     size="sm"
@@ -206,6 +241,7 @@ function Pagina() {
                       setLiqValor("");
                       setLiqIr("");
                       setLiqMsg(null);
+                      setResgId(null);
                     }}
                   >
                     Liquidar
@@ -216,6 +252,93 @@ function Pagina() {
           </tbody>
         </table>
       </div>
+      {edit ? (
+        <form
+          className="mt-4 grid grid-cols-1 gap-3 rounded-[16px] border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void atualizarTituloRf(edit.id, {
+              dataAplicacao: (edit.dataAplicacao ?? "").slice(0, 10),
+              valorAplicado: parseNumeroBR(editValor),
+              ticker: edit.ticker ?? edit.nome ?? "",
+              emissor: edit.emissor ?? "",
+            }).then(async () => {
+              setEdit(null);
+              await carregar();
+            });
+          }}
+        >
+          <label className="text-xs text-muted">Aplicação
+            <input type="date" className="mt-1 h-9 w-full rounded-md border border-input-border bg-input px-2 text-sm" value={(edit.dataAplicacao ?? "").slice(0, 10)} onChange={(e) => setEdit({ ...edit, dataAplicacao: e.target.value })} />
+          </label>
+          <label className="text-xs text-muted">Ticker
+            <input className="mt-1 h-9 w-full rounded-md border border-input-border bg-input px-2 text-sm" value={edit.ticker ?? ""} onChange={(e) => setEdit({ ...edit, ticker: e.target.value })} />
+          </label>
+          <label className="text-xs text-muted">Emissor
+            <input className="mt-1 h-9 w-full rounded-md border border-input-border bg-input px-2 text-sm" value={edit.emissor ?? ""} onChange={(e) => setEdit({ ...edit, emissor: e.target.value })} />
+          </label>
+          <label className="text-xs text-muted">Valor aplicado
+            <CampoValor value={editValor} onChange={setEditValor} />
+          </label>
+          <div className="flex gap-2 lg:col-span-4">
+            <Button type="submit">Salvar</Button>
+            <Button type="button" variant="secondary" onClick={() => setEdit(null)}>Cancelar</Button>
+          </div>
+        </form>
+      ) : null}
+      {resgId != null ? (
+        <form
+          className="mt-4 grid grid-cols-1 gap-3 rounded-[16px] border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const id = resgId;
+            void resgatarParcialTituloRf(id, resgData, parseNumeroBR(resgBruto))
+              .then(async (s) => {
+                setLiqMsg(
+                  `Resgate parcial lançado. Líquido ${formatBRL(s.liquido)}. Principal que ficou ${formatBRL(s.principalFica)}.${s.isento ? " Título isento de IR." : " O rendimento entrou no IRPFM."}`,
+                );
+                setResgId(null);
+                await carregar();
+              })
+              .catch((err: unknown) => setLiqMsg(err instanceof Error ? err.message : "Falha no resgate"));
+          }}
+        >
+          <div className="sm:col-span-2 lg:col-span-4 text-sm text-muted">
+            <p>
+              Resgate parcial de {titulos.find((t) => t.id === resgId)?.ticker ?? "título"}. Informe o valor bruto
+              que saiu do título, antes de IR e IOF.
+            </p>
+            <p className="mt-1 text-xs">
+              A lei não separa “só juros” ou “só principal”. A fração resgatada leva a mesma fração dos dois.
+              IR (Lei 11.033/2004) e IOF (Decreto 6.306/2007) incidem só sobre o rendimento. LCI, LCA, CRI, CRA,
+              debênture incentivada e poupança não pagam IR.
+            </p>
+          </div>
+          <label className="text-xs text-muted">
+            Data do resgate
+            <input
+              type="date"
+              required
+              value={resgData}
+              onChange={(e) => setResgData(e.target.value)}
+              className="mt-1 h-11 w-full rounded-md border border-input-border bg-input px-3 text-sm text-fg"
+            />
+          </label>
+          <label className="text-xs text-muted">
+            Valor bruto resgatado
+            <CampoValor value={resgBruto} onChange={setResgBruto} />
+          </label>
+          <PreviaResgate id={resgId} titulos={titulos} data={resgData} bruto={resgBruto} />
+          <div className="flex items-end gap-2">
+            <Button type="submit" size="sm">
+              Confirmar resgate
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => setResgId(null)}>
+              Cancelar
+            </Button>
+          </div>
+        </form>
+      ) : null}
       {liqId != null ? (
         <form
           className="mt-4 grid grid-cols-1 gap-3 rounded-[16px] border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-4"
@@ -266,6 +389,51 @@ function Pagina() {
         </form>
       ) : null}
       {liqMsg ? <p className="mt-3 text-sm text-muted">{liqMsg}</p> : null}
+    </div>
+  );
+}
+
+function PreviaResgate({
+  id,
+  titulos,
+  data,
+  bruto,
+}: {
+  id: number;
+  titulos: TituloRf[];
+  data: string;
+  bruto: string;
+}) {
+  const titulo = titulos.find((t) => t.id === id);
+  const valor = parseNumeroBR(bruto);
+  if (!titulo || !(valor > 0) || !data) return null;
+  let sim;
+  try {
+    sim = simularResgateParcial({
+      dataAplicacao: titulo.dataAplicacao,
+      data,
+      valorAplicado: titulo.valorAplicado,
+      valorMercado: titulo.valorMercado,
+      valorBruto: valor,
+      isento: titulo.isencaoIr,
+    });
+  } catch (e) {
+    return (
+      <p className="sm:col-span-2 lg:col-span-4 text-xs text-loss">
+        {e instanceof Error ? e.message : "Não foi possível calcular o resgate."}
+      </p>
+    );
+  }
+  return (
+    <div className="sm:col-span-2 lg:col-span-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+      <p>Fração: {formatPct(sim.fracao, 2)}</p>
+      <p>Principal que sai: {formatBRL(sim.principalSai)}</p>
+      <p>Rendimento: {formatBRL(sim.rendimento)}</p>
+      <p>IOF ({formatPct(sim.aliquotaIof, 0)}): {formatBRL(sim.iof)}</p>
+      <p>IR ({sim.isento ? "isento" : formatPct(sim.aliquotaIr, 1)}): {formatBRL(sim.ir)}</p>
+      <p>Líquido: {formatBRL(sim.liquido)}</p>
+      <p>Principal que fica: {formatBRL(sim.principalFica)}</p>
+      <p>Dias corridos: {sim.dias}</p>
     </div>
   );
 }

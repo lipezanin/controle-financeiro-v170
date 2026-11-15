@@ -126,7 +126,13 @@ export async function atualizarItem(
 export async function excluirItem(sessao: string, id: number): Promise<void> {
   const db = await dbCadastro();
   const tabela = assertSessao(sessao);
+  const atual = consultar(db, `SELECT nome FROM ${tabela} WHERE id = ?`, [id])[0];
+  if (!atual) throw new Error("Item não encontrado.");
   executar(db, `DELETE FROM ${tabela} WHERE id = ?`, [id]);
+  executar(db, `INSERT OR IGNORE INTO cadastros_ocultos (sessao, nome) VALUES (?, ?)`, [
+    sessao,
+    String(atual.nome),
+  ]);
   espelharEav(db, sessao);
   await salvarDb();
 }

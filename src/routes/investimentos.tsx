@@ -7,11 +7,11 @@ import { SectionTitle } from "@/components/section-title";
 import { TabelaCarteira } from "@/components/tabela-carteira";
 import { Button } from "@/components/ui/button";
 import { formatBRL, formatData, formatPct, formatQtd } from "@/lib/financeiro/format";
-import { cn } from "@/lib/utils";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useRecorteMercado } from "@/hooks/mercado-context";
 import { passaRecorte } from "@/lib/financeiro/mercado";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { dataNoPeriodo } from "@/lib/financeiro/periodo";
 import {
   consultarAtivo,
@@ -24,23 +24,26 @@ import { serieCotacao, cicloHistoricoNoturno, type PontoHistorico } from "@/serv
 
 export const Route = createFileRoute("/investimentos")({
   validateSearch: (s: Record<string, unknown>) => ({
-    aba: s.aba === "inativa" ? ("inativa" as const) : ("ativa" as const),
+    aba: s.aba === "inativa" ? ("inativa" as const) : s.aba === "historico" ? ("historico" as const) : ("ativa" as const),
+    ticker: typeof s.ticker === "string" ? s.ticker : "",
   }),
   component: Pagina,
 });
 
 function Pagina() {
-  const { aba: abaUrl } = Route.useSearch();
+  const { aba: abaUrl, ticker: tickerUrl } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { periodo } = usePeriodo();
   const { recorte } = useRecorteMercado();
   const [carteira, setCarteira] = useState<Carteira | null>(null);
-  const [aba, setAba] = useState<"ativa" | "inativa">(abaUrl);
+  const [aba, setAba] = useState<"ativa" | "inativa" | "historico">(abaUrl);
   const [ticker, setTicker] = useState("BBAS3");
   const [consulta, setConsulta] = useState<ResumoAtivo | null>(null);
   const [yoc, setYoc] = useState<PontoYoc[]>([]);
   const [seriePreco, setSeriePreco] = useState<PontoHistorico[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [erroLista, setErroLista] = useState<string | null>(null);
+  const ordemHist = useOrdenacao<"data" | "tipo" | "qtd" | "preco" | "valor">("data");
 
   useEffect(() => {
     setAba(abaUrl);
@@ -72,8 +75,9 @@ function Pagina() {
   }, []);
 
   useEffect(() => {
-    void atualizar("BBAS3");
-  }, [atualizar]);
+    if (abaUrl !== "historico") return;
+    void atualizar(tickerUrl || "BBAS3");
+  }, [abaUrl, tickerUrl, atualizar]);
 
   const recarregarMercado = useCallback(() => {
     recarregarLista();
@@ -93,7 +97,6 @@ function Pagina() {
     [grupos],
   );
   const bolsa = (grupos ?? []).filter((g) => g.grupo !== "Imóveis");
-  const imoveis = (grupos ?? []).filter((g) => g.grupo === "Imóveis");
   const totBolsa = bolsa.reduce(
     (s, g) => {
       for (const p of g.posicoes) {
@@ -105,20 +108,25 @@ function Pagina() {
     },
     { custo: 0, mercado: 0, proventos: 0 },
   );
-  const totImoveis = imoveis.reduce((s, g) => s + g.posicoes.reduce((a, p) => a + p.valorInvestido, 0), 0);
   const rentBolsa = totBolsa.custo ? (totBolsa.mercado - totBolsa.custo + totBolsa.proventos) / totBolsa.custo : null;
 
   return (
     <div className="mx-auto max-w-6xl">
       <SectionTitle
         kicker="Módulo"
-        title="01 — Investimentos · Carteira e histórico"
-        description="Carteira ativa e inativa por classe. Clique no ticker para abrir o mestre, com yield on cost e o histórico de até 40 operações."
+        title={abaUrl === "historico" ? "Histórico e análise de ativos" : "01 — Investimentos · Carteira"}
+        description={
+          abaUrl === "historico"
+            ? "Ticker mestre, yield on cost e o histórico das operações. A cotação vem do histórico gravado no app."
+            : "Carteira de bolsa, por classe. Imóvel fica no menu Imóveis."
+        }
       />
       {erroLista ? <p className="mb-4 text-sm text-loss">{erroLista}</p> : null}
 
+      {abaUrl === "historico" ? (
+      <>
       <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        SESSÃO 4 — Histórico do ativo
+        Histórico e análise do ativo
       </p>
       <form
         className="mb-4 flex flex-wrap items-center gap-2"
@@ -239,21 +247,47 @@ function Pagina() {
           ) : null}
 
           <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-            Histórico de operações (até 40)
+            Histórico de operações
           </p>
           <div className="mb-10 overflow-x-auto rounded-lg border border-border">
             <table className="zebra min-w-[640px] w-full border-collapse text-left text-xs">
               <thead>
                 <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-                  <th className="px-3 py-2.5">Data</th>
-                  <th className="px-3 py-2.5">Tipo</th>
-                  <th className="px-3 py-2.5 text-right">Quantidade</th>
-                  <th className="px-3 py-2.5 text-right">Preço da operação</th>
-                  <th className="px-3 py-2.5 text-right">Valor total</th>
+                  <th className="px-3 py-2.5">
+                    <button type="button" onClick={() => ordemHist.toggle("data")}>
+                      Data{rotuloOrdem(ordemHist.chave === "data", ordemHist.dir)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2.5">
+                    <button type="button" onClick={() => ordemHist.toggle("tipo")}>
+                      Tipo{rotuloOrdem(ordemHist.chave === "tipo", ordemHist.dir)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2.5 text-right">
+                    <button type="button" onClick={() => ordemHist.toggle("qtd")}>
+                      Quantidade{rotuloOrdem(ordemHist.chave === "qtd", ordemHist.dir)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2.5 text-right">
+                    <button type="button" onClick={() => ordemHist.toggle("preco")}>
+                      Preço da operação{rotuloOrdem(ordemHist.chave === "preco", ordemHist.dir)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2.5 text-right">
+                    <button type="button" onClick={() => ordemHist.toggle("valor")}>
+                      Valor total{rotuloOrdem(ordemHist.chave === "valor", ordemHist.dir)}
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {consulta.historico.filter((h) => dataNoPeriodo(h.data, periodo)).map((h, i) => (
+                {ordemHist
+                  .ordenar(
+                    consulta.historico.filter((h) => dataNoPeriodo(h.data, periodo)),
+                    (h, k) =>
+                      k === "data" ? h.data : k === "tipo" ? h.tipo : k === "qtd" ? h.quantidade : k === "preco" ? h.preco : h.valor,
+                  )
+                  .map((h, i) => (
                   <tr key={`${h.data}-${h.tipo}-${i}`}>
                     <td className="px-3 py-2">{formatData(h.data)}</td>
                     <td className="px-3 py-2">{h.tipo}</td>
@@ -267,7 +301,11 @@ function Pagina() {
           </div>
         </>
       ) : null}
+      </>
+      ) : null}
 
+      {abaUrl !== "historico" ? (
+      <>
       <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
         Sessão 1 — Bolsa de valores
       </p>
@@ -293,61 +331,19 @@ function Pagina() {
       </div>
 
       <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        Sessão 2 — Imóveis
+        Carteira {aba === "ativa" ? "ativa (qtd > 0)" : "inativa / histórico"} · {nPos} posições
       </p>
-      <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <KpiCard label="Custo dos imóveis" value={formatBRL(totImoveis)} hint="A rentabilidade real só aparece na venda." />
-        <KpiCard label="Imóveis na carteira" value={String(imoveis.reduce((s, g) => s + g.posicoes.length, 0))} />
-      </div>
 
-      <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        SESSÃO 3 — Carteira {aba === "ativa" ? "ativa (qtd > 0)" : "inativa / histórico"}
-      </p>
-      <div className="mb-4 flex flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={aba === "ativa" ? "default" : "secondary"}
-          className={cn(aba === "ativa" && "pointer-events-none")}
-          onClick={() => setAba("ativa")}
-        >
-          Ativa
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={aba === "inativa" ? "default" : "secondary"}
-          onClick={() => setAba("inativa")}
-        >
-          Inativa
-        </Button>
-        <span className="self-center text-xs text-subtle">{nPos} posições</span>
-      </div>
-
-      <p className="mb-3 mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Bolsa</p>
       {bolsa.map((g) => (
         <TabelaCarteira
           key={g.grupo}
           grupo={g.grupo}
           posicoes={g.posicoes}
-          onTicker={(t) => {
-            window.scrollTo({ top: 0, behavior: "smooth" });
-            void atualizar(t);
-          }}
+          onTicker={(t) => void navigate({ search: { aba: "historico", ticker: t } })}
         />
       ))}
-      <p className="mb-3 mt-2 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Imóveis</p>
-      {imoveis.map((g) => (
-        <TabelaCarteira
-          key={g.grupo}
-          grupo={g.grupo}
-          posicoes={g.posicoes}
-          onTicker={(t) => {
-            window.scrollTo({ top: 0, behavior: "smooth" });
-            void atualizar(t);
-          }}
-        />
-      ))}
+      </>
+      ) : null}
     </div>
   );
 }

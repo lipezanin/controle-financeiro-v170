@@ -110,16 +110,13 @@ function hostPermitido(url) {
   }
 }
 
-function baixarArquivo(url, dest) {
+function baixarBinario(url, dest, tipo) {
   return new Promise((resolve, reject) => {
     if (!hostPermitido(url)) {
       reject(new Error("URL de atualização não permitida."));
       return;
     }
-    const req = net.request({
-      url,
-      redirect: "manual",
-    });
+    const req = net.request({ url, redirect: "manual" });
     req.setHeader("User-Agent", "ControleFinanceiro");
     req.setHeader("Accept", "application/octet-stream");
     req.on("response", (res) => {
@@ -128,8 +125,7 @@ function baixarArquivo(url, dest) {
       const loc = Array.isArray(locRaw) ? locRaw[0] : locRaw;
       if (codigo >= 300 && codigo < 400 && loc) {
         res.resume();
-        const proxima = new URL(loc, url).href;
-        baixarArquivo(proxima, dest).then(resolve, reject);
+        baixarBinario(new URL(loc, url).href, dest, tipo).then(resolve, reject);
         return;
       }
       if (codigo !== 200) {
@@ -138,30 +134,86 @@ function baixarArquivo(url, dest) {
         return;
       }
       const arquivo = fs.createWriteStream(dest);
-      let bytes = 0;
-      let inicio = "";
-      res.on("data", (chunk) => {
-        bytes += chunk.length;
-        if (inicio.length < 80) inicio += chunk.subarray(0, 80).toString("utf8");
-        arquivo.write(chunk);
-      });
-      res.on("end", () => {
-        arquivo.end(() => {
-          if (bytes < 1_000_000 || inicio.trim().startsWith("<") || inicio.trim().startsWith("{")) {
-            fs.rmSync(dest, { force: true });
-            reject(new Error("O arquivo baixado não é o instalador."));
-            return;
+      res.pipe(arquivo);
+      arquivo.on("finish", () =>
+        arquivo.close(() => {
+          try {
+            const st = fs.statSync(dest);
+            const cab = Buffer.alloc(8);
+            const fd = fs.openSync(dest, "r");
+            fs.readSync(fd, cab, 0, 8, 0);
+            fs.closeSync(fd);
+            const marca = cab.toString("ascii");
+            const html = marca.trim().startsWith("<") || marca.trim().startsWith("{");
+            const ok = !html && (tipo === "zip" ? marca.startsWith("PK") && st.size > 100 : marca.startsWith("MZ") && st.size > 1_000_000);
+            if (!ok) {
+              fs.rmSync(dest, { force: true });
+              reject(new Error(tipo === "zip" ? "O arquivo baixado não é o pacote de atualização." : "O arquivo baixado não é o instalador."));
+              return;
+            }
+            resolve(dest);
+          } catch (e) {
+            reject(e);
           }
-          resolve(dest);
-        });
-      });
-      res.on("error", reject);
+        }),
+      );
       arquivo.on("error", reject);
+      res.on("error", reject);
     });
     req.on("error", reject);
     req.end();
   });
 }
+
+function baixarArquivo(url, dest) {
+  return baixarBinario(url, dest, "exe");
+}
+
+const deltaZip = () => path.join(app.getPath("temp"), "ControleFinanceiro-delta.zip");
+
+ipcMain.handle("cf-baixar-delta", async (_evt, url) => {
+  if (typeof url !== "string" || !/^https:\/\//.test(url)) throw new Error("URL de delta ausente.");
+  await baixarBinario(url, deltaZip(), "zip");
+  return true;
+});
+
+ipcMain.handle("cf-aplicar-delta", async () => {
+  const zip = deltaZip();
+  if (!fs.existsSync(zip)) throw new Error("A atualização ainda não foi baixada.");
+  const dest = path.dirname(process.execPath);
+  const script = path.join(app.getPath("temp"), "cf-aplicar-delta.ps1");
+  const stage = path.join(app.getPath("temp"), "cf-delta-stage");
+  const ps = `
+$ErrorActionPreference = 'Stop'
+$zip = ${JSON.stringify(zip)}
+$stage = ${JSON.stringify(stage)}
+$dest = ${JSON.stringify(dest)}
+for ($i = 0; $i -lt 40; $i++) {
+  if (-not (Get-Process -Name 'ControleFinanceiro' -ErrorAction SilentlyContinue)) { break }
+  Start-Sleep -Seconds 1
+}
+if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+New-Item -ItemType Directory -Path $stage | Out-Null
+Expand-Archive -LiteralPath $zip -DestinationPath $stage -Force
+Copy-Item -Path (Join-Path $stage '*') -Destination $dest -Recurse -Force
+Start-Process -FilePath (Join-Path $dest 'ControleFinanceiro.exe')
+`;
+  fs.writeFileSync(script, ps, "utf8");
+  const elev = spawn(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      `Start-Process -FilePath powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',${JSON.stringify(script)}`,
+    ],
+    { detached: true, stdio: "ignore" },
+  );
+  elev.unref();
+  setTimeout(() => app.quit(), 600);
+  return true;
+});
 
 ipcMain.handle("cf-atualizar", async (_evt, url) => {
   if (typeof url !== "string") throw new Error("URL ausente.");

@@ -7,6 +7,7 @@ import { CampoValor } from "@/components/campo-valor";
 import { SelectCadastro } from "@/components/select-cadastro";
 import { Button } from "@/components/ui/button";
 import { useCadastros } from "@/hooks/use-cadastro";
+import { TickerCampo } from "@/components/ticker-campo";
 import { lancarExtratoBancario } from "@/services/lancamento-service";
 
 const MAX = 20;
@@ -40,6 +41,17 @@ export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [geracao, setGeracao] = useState(0);
+
+  function limparPainel() {
+    setInstituicao("");
+    setOrigem("Nacional");
+    setMoeda("BRL");
+    setLinhas(Array.from({ length: MAX }, vazia));
+    setMsg(null);
+    setErro(null);
+    setGeracao((g) => g + 1);
+  }
 
   function setLinha(i: number, patch: Partial<Row>) {
     setLinhas((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -104,7 +116,7 @@ export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
           </thead>
           <tbody>
             {linhas.map((ln, idx) => (
-              <tr key={idx} className="border-t border-border/60">
+              <tr key={`${geracao}-${idx}`} className="border-t border-border/60">
                 <td className="px-2 py-1 text-subtle">{idx + 1}</td>
                 <td className="px-1 py-1">
                   <input
@@ -140,7 +152,7 @@ export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
                   />
                 </td>
                 <td className="px-1 py-1">
-                  <input className={campo} value={ln.ticker} onChange={(e) => setLinha(idx, { ticker: e.target.value })} />
+                  <TickerCampo value={ln.ticker} onChange={(ticker) => setLinha(idx, { ticker })} />
                 </td>
                 <td className="px-1 py-1">
                   <CampoValor
@@ -159,8 +171,8 @@ export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
         <Button type="button" disabled={busy} onClick={() => void confirmar()}>
           {busy ? "Lançando…" : "Confirmar extrato"}
         </Button>
-        <Button type="button" variant="secondary" onClick={() => setLinhas(Array.from({ length: MAX }, vazia))}>
-          Limpar
+        <Button type="button" variant="secondary" disabled={busy} onClick={limparPainel}>
+          Limpar painel
         </Button>
       </div>
       {msg ? <p className="text-[12px] text-gain">{msg}</p> : null}

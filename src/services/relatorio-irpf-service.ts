@@ -7,6 +7,7 @@
 
 import { consultar, getDb, type LinhaSql } from "@/lib/financeiro/db";
 import { formatBRL } from "@/lib/financeiro/format";
+import { ehImovel, ehSaidaImovel, TIPOS_CUSTO_IMOVEL } from "@/lib/financeiro/imovel";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 function num(v: unknown): number {
@@ -117,8 +118,8 @@ export async function montarRelatorioIrpf(anoForcado?: number): Promise<Relatori
     if (!dt) continue;
     const tipo = str(campo(r, "tipo_operacao"));
     const valor = num(campo(r, "valor_brl"));
-    const compra = tipo === "Compra" || tipo === "Parcela Imóvel" || tipo === "ITBI / Cartório";
-    const venda = tipo === "Venda";
+    const compra = tipo === "Compra" || (TIPOS_CUSTO_IMOVEL as readonly string[]).includes(tipo);
+    const venda = tipo === "Venda" || (ehImovel(str(campo(r, "categoria"))) && ehSaidaImovel(tipo));
     if (compra && dt.raw < corteIni) patIni += valor;
     if (venda && dt.raw < corteIni) patIni -= valor;
     if (compra && dt.raw < corteFim) patFim += valor;

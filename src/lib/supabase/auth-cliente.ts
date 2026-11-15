@@ -85,18 +85,18 @@ export async function sairSupabase(): Promise<void> {
 
 export async function restaurarSessao(): Promise<SessaoSupabase | null> {
   const atual = lerSessaoSupabase();
-  if (atual) return atual;
-  if (typeof window === "undefined") return null;
+  const fresco =
+    !!atual && (!atual.expiresAt || atual.expiresAt * 1000 > Date.now() + 60_000);
+  if (fresco) return atual;
+  if (!atual?.refreshToken) return null;
   try {
-    const bruto = localStorage.getItem("cf-supabase-sessao");
-    if (!bruto) return null;
-    const velha = JSON.parse(bruto) as SessaoSupabase;
-    if (!velha.refreshToken) return null;
-    const j = await postAuth("/token?grant_type=refresh_token", { refresh_token: velha.refreshToken });
+    const j = await postAuth("/token?grant_type=refresh_token", { refresh_token: atual.refreshToken });
     const s = paraSessao(j);
     gravarSessaoSupabase(s);
     return s;
-  } catch {
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (/fetch|network|failed|abort/i.test(msg)) return atual;
     gravarSessaoSupabase(null);
     return null;
   }

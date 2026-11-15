@@ -2,6 +2,7 @@
  * Proxies de cotação também no build (web e desktop).
  * No dev o Vite já faz isso; aqui cobre produção/Nitro.
  */
+import { lerLatest } from "../latest-release.mjs";
 
 const TESOURO_CSV =
   "https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/precotaxatesourodireto.csv";
@@ -27,6 +28,29 @@ export default async function cotacaoProxy(
       });
     } catch (err) {
       return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "tesouro" }), {
+        status: 502,
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
+  if (path === "/proxy/busca") {
+    const q = (event.url.searchParams.get("q") ?? "").trim();
+    if (q.length < 2) {
+      return new Response(JSON.stringify({ quotes: [] }), {
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
+    try {
+      const dest = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0`;
+      const r = await fetch(dest, { headers: { "User-Agent": "ControleFinanceiroLocal/1.0" } });
+      const text = await r.text();
+      return new Response(text, {
+        status: r.status,
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "busca" }), {
         status: 502,
         headers: { "content-type": "application/json" },
       });
@@ -69,7 +93,6 @@ export default async function cotacaoProxy(
 
   if (path === "/api/latest") {
     try {
-      const { lerLatest } = await import("../../server/latest-release.mjs");
       const j = await lerLatest();
       return new Response(JSON.stringify(j), {
         headers: { "content-type": "application/json", "cache-control": "no-store" },

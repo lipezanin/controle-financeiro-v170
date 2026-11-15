@@ -7,6 +7,7 @@ import { formatBRL, formatPct } from "@/lib/financeiro/format";
 import { dataNoPeriodo } from "@/lib/financeiro/periodo";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { consultar, getDb } from "@/lib/financeiro/db";
 import { listarCarteira, type Posicao } from "@/services/investimento-service";
 
@@ -163,6 +164,10 @@ function Pagina() {
 
 function ListaClasse({ grupo, itens }: { grupo: string; itens: Posicao[] }) {
   const [aberto, setAberto] = useState(false);
+  const ordem = useOrdenacao<"ativo" | "prov" | "yoc">("ativo");
+  const linhas = ordem.ordenar(itens, (p, k) =>
+    k === "ativo" ? p.ticker : k === "prov" ? p.proventosLiq : (p.yieldOnCost ?? 0),
+  );
   const total = itens.reduce((s, p) => s + p.proventosLiq, 0);
   return (
     <section className="mb-3">
@@ -182,13 +187,25 @@ function ListaClasse({ grupo, itens }: { grupo: string; itens: Posicao[] }) {
           <table className="zebra w-full min-w-[520px] text-left text-xs">
             <thead>
               <tr className="bg-surface-2 text-[11px] uppercase tracking-[0.12em] text-muted">
-                <th className="px-3 py-2">Ativo</th>
-                <th className="px-3 py-2 text-right">Proventos</th>
-                <th className="px-3 py-2 text-right">YoC</th>
+                <th className="px-3 py-2">
+                  <button type="button" onClick={() => ordem.toggle("ativo")}>
+                    Ativo{rotuloOrdem(ordem.chave === "ativo", ordem.dir)}
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-right">
+                  <button type="button" onClick={() => ordem.toggle("prov")}>
+                    Proventos{rotuloOrdem(ordem.chave === "prov", ordem.dir)}
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-right">
+                  <button type="button" onClick={() => ordem.toggle("yoc")}>
+                    YoC{rotuloOrdem(ordem.chave === "yoc", ordem.dir)}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {itens.map((p) => (
+              {linhas.map((p) => (
                 <tr key={p.chave}>
                   <td className="px-3 py-2 font-medium">{p.ticker}</td>
                   <td className="px-3 py-2 text-right font-mono tabular">{formatBRL(p.proventosLiq)}</td>

@@ -30,6 +30,24 @@ export function cotacaoProxyPlugin() {
           createReadStream(exe).pipe(res);
           return;
         }
+        if (pathOnly === "/proxy/busca") {
+          try {
+            const u = new URL(raw, "http://127.0.0.1");
+            const q = (u.searchParams.get("q") ?? "").trim();
+            const dest = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0`;
+            const r = await fetch(dest, { headers: { "User-Agent": "ControleFinanceiroLocal/1.0" } });
+            const text = await r.text();
+            res.statusCode = r.status;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.setHeader("cache-control", "no-store");
+            res.end(text);
+          } catch (err) {
+            res.statusCode = 502;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ error: err instanceof Error ? err.message : "busca" }));
+          }
+          return;
+        }
         if (pathOnly === "/api/latest") {
           try {
             const j = await lerLatest();

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CardsClasse, GraficoDonut, GraficoEvolucaoPatrimonio } from "@/components/graficos-financeiro";
 import { KpiCard } from "@/components/kpi-card";
 import { SectionTitle } from "@/components/section-title";
@@ -9,8 +9,10 @@ import { usePeriodo } from "@/hooks/periodo-context";
 import { useRecorteMercado } from "@/hooks/mercado-context";
 import { classeNoRecorte } from "@/lib/financeiro/mercado";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { evolucaoPatrimonio, type PontoEvolucao } from "@/services/evolucao-patrimonio-service";
 import { listarCarteira, type Carteira } from "@/services/investimento-service";
+import { atualizarPosicoes } from "@/services/cotacao-ativos-service";
 import { resumirPatrimonio, type ResumoPatrimonio } from "@/services/patrimonio-service";
 import { resumirRentabilidade, type Rentabilidade } from "@/services/rentabilidade-service";
 
@@ -30,28 +32,35 @@ function Pagina() {
   const [carteira, setCarteira] = useState<Carteira | null>(null);
   const [grupo, setGrupo] = useState("");
   const [erro, setErro] = useState<string | null>(null);
+  const ordemComp = useOrdenacao<"classe" | "valor">("classe");
+  const cotou = useRef(false);
 
   const carregar = useCallback(() => {
-    void Promise.all([
-      resumirPatrimonio(periodoGlobal),
-      resumirRentabilidade({
-        grupo: grupo || undefined,
-        periodo: periodoGlobal,
-        recorte,
-      }),
-      evolucaoPatrimonio(periodoGlobal),
-      listarCarteira(),
-    ])
-      .then(([p, rt, ev, cart]) => {
+    void (async () => {
+      try {
+        if (!cotou.current) {
+          cotou.current = true;
+          await atualizarPosicoes().catch(() => null);
+        }
+        const [p, rt, ev, cart] = await Promise.all([
+          resumirPatrimonio(periodoGlobal),
+          resumirRentabilidade({
+            grupo: grupo || undefined,
+            periodo: periodoGlobal,
+            recorte,
+          }),
+          evolucaoPatrimonio(periodoGlobal),
+          listarCarteira(),
+        ]);
         setR(p);
         setRent(rt);
         setEvo(ev);
         setCarteira(cart);
         setErro(null);
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         setErro(e instanceof Error ? e.message : "Falha ao ler o patrimônio");
-      });
+      }
+    })();
   }, [grupo, periodoGlobal, recorte]);
 
   useEffect(() => {
@@ -152,14 +161,26 @@ function Pagina() {
         <table className="zebra min-w-[520px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-              <th className="px-3 py-2.5">Classe</th>
-              <th className="px-3 py-2.5 text-right">Valor</th>
-              <th className="px-3 py-2.5 text-right">%</th>
+              <th className="px-3 py-2.5">
+                <button type="button" onClick={() => ordemComp.toggle("classe")}>
+                  Classe{rotuloOrdem(ordemComp.chave === "classe", ordemComp.dir)}
+                </button>
+              </th>
+              <th className="px-3 py-2.5 text-right">
+                <button type="button" onClick={() => ordemComp.toggle("valor")}>
+                  Valor{rotuloOrdem(ordemComp.chave === "valor", ordemComp.dir)}
+                </button>
+              </th>
+              <th className="px-3 py-2.5 text-right">
+                <button type="button" onClick={() => ordemComp.toggle("valor")}>
+                  %{rotuloOrdem(ordemComp.chave === "valor", ordemComp.dir)}
+                </button>
+              </th>
               <th className="px-3 py-2.5">Peso</th>
             </tr>
           </thead>
           <tbody>
-            {composicao.map((c) => {
+            {ordemComp.ordenar(composicao, (c, k) => (k === "classe" ? c.classe : c.valor)).map((c) => {
               const pct = totalComp ? c.valor / totalComp : 0;
               return (
                 <tr key={c.classe}>

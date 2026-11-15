@@ -1,15 +1,15 @@
 /**
  * Configurações → Base de Dados: uma sessão = uma tabela = itens em linha.
  */
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SelectCadastro } from "@/components/select-cadastro";
 import { Button } from "@/components/ui/button";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { SESSOES_CADASTRO, type SessaoCadastro } from "@/lib/financeiro/cadastros-def";
 import {
   atualizarItem,
   atualizarTipoRendimento,
-  contarSessoes,
   excluirItem,
   excluirTipoRendimento,
   inserirItem,
@@ -24,65 +24,19 @@ import {
 const campo =
   "h-9 w-full rounded-md border border-input-border bg-input px-2 text-sm text-fg";
 
-function secoes(): { secao: string; grupos: SessaoCadastro[] }[] {
-  const map = new Map<string, SessaoCadastro[]>();
-  for (const s of SESSOES_CADASTRO) {
-    const arr = map.get(s.secao) ?? [];
-    arr.push(s);
-    map.set(s.secao, arr);
-  }
-  return [...map.entries()].map(([secao, grupos]) => ({ secao, grupos }));
-}
-
-export function ConfiguracoesBase() {
-  const primeiro = SESSOES_CADASTRO[0]!;
+export function ConfiguracoesBase({ sessaoId }: { sessaoId?: string }) {
+  const primeiro = SESSOES_CADASTRO.find((s) => s.id === sessaoId) ?? SESSOES_CADASTRO[0]!;
   const [sessao, setSessao] = useState<SessaoCadastro>(primeiro);
-  const [contagens, setContagens] = useState<Record<string, number>>({});
-
-  const recarregarContagens = useCallback(() => {
-    void contarSessoes().then(setContagens);
-  }, []);
 
   useEffect(() => {
-    recarregarContagens();
-  }, [recarregarContagens, sessao.id]);
+    const achou = SESSOES_CADASTRO.find((s) => s.id === sessaoId);
+    if (achou) setSessao(achou);
+  }, [sessaoId]);
 
-  return (
-    <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-      <nav className="space-y-3 rounded-[12px] border border-border bg-surface p-3">
-        {secoes().map((sec) => (
-          <div key={sec.secao}>
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-subtle">
-              {sec.secao}
-            </p>
-            <ul className="space-y-1">
-              {sec.grupos.map((g) => (
-                <li key={g.id}>
-                  <button
-                    type="button"
-                    className={
-                      sessao.id === g.id
-                        ? "flex w-full items-center justify-between rounded-[8px] bg-accent px-2 py-1.5 text-left text-[12px] text-accent-fg"
-                        : "flex w-full items-center justify-between rounded-[8px] px-2 py-1.5 text-left text-[12px] text-muted hover:bg-surface-2 hover:text-fg"
-                    }
-                    onClick={() => setSessao(g)}
-                  >
-                    <span>{g.rotulo}</span>
-                    <span className="tabular text-[10px] opacity-80">{contagens[g.id] ?? "—"}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </nav>
-
-      {sessao.especial === "tipo_rendimento" ? (
-        <PainelTipoRendimento sessao={sessao} onMudou={recarregarContagens} />
-      ) : (
-        <PainelItens sessao={sessao} onMudou={recarregarContagens} />
-      )}
-    </div>
+  return sessao.especial === "tipo_rendimento" ? (
+    <PainelTipoRendimento sessao={sessao} onMudou={() => undefined} />
+  ) : (
+    <PainelItens sessao={sessao} onMudou={() => undefined} />
   );
 }
 
@@ -94,6 +48,9 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
   const [erro, setErro] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editNome, setEditNome] = useState("");
+  const ordem = useOrdenacao<"item" | "ativo">("item");
 
   const carregar = useCallback(async () => {
     setItens(await listarItens(sessao.id, true));
@@ -113,6 +70,7 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
     if (!q) return itens;
     return itens.filter((i) => i.nome.toLowerCase().includes(q) || i.codigo.toLowerCase().includes(q));
   }, [itens, filtro]);
+  const lista = ordem.ordenar(visiveis, (it, k) => (k === "ativo" ? (it.ativo ? 1 : 0) : it.nome));
 
   async function adicionar() {
     setBusy(true);
@@ -138,16 +96,16 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
         <p className="mt-1 text-[11px] text-subtle">Usado em: {sessao.usadoEm}</p>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="space-y-2">
         <input
           className={campo}
           placeholder="Buscar item…"
           value={filtro}
           onChange={(e) => setFiltro(e.target.value)}
         />
-        <div className="flex min-w-0 flex-1 gap-2">
+        <div className="flex gap-2">
           <input
-            className={campo}
+            className={`${campo} min-w-0 flex-1`}
             placeholder="Novo item"
             value={novo}
             onChange={(e) => setNovo(e.target.value)}
@@ -158,7 +116,7 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
               }
             }}
           />
-          <Button type="button" size="sm" disabled={busy || !novo.trim()} onClick={() => void adicionar()}>
+          <Button type="button" size="sm" className="shrink-0" disabled={busy || !novo.trim()} onClick={() => void adicionar()}>
             <Plus className="size-4" />
             Incluir
           </Button>
@@ -170,8 +128,16 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
           <thead className="bg-bg text-[11px] uppercase tracking-[0.12em] text-muted">
             <tr>
               <th className="w-10 px-2 py-2">#</th>
-              <th className="px-2 py-2">Item</th>
-              <th className="w-24 px-2 py-2">Ativo</th>
+              <th className="px-2 py-2">
+                <button type="button" onClick={() => ordem.toggle("item")}>
+                  Item{rotuloOrdem(ordem.chave === "item", ordem.dir)}
+                </button>
+              </th>
+              <th className="w-24 px-2 py-2">
+                <button type="button" onClick={() => ordem.toggle("ativo")}>
+                  Ativo{rotuloOrdem(ordem.chave === "ativo", ordem.dir)}
+                </button>
+              </th>
               <th className="w-36 px-2 py-2 text-right">Ações</th>
             </tr>
           </thead>
@@ -183,20 +149,29 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
                 </td>
               </tr>
             ) : (
-              visiveis.map((it, idx) => (
+              lista.map((it, idx) => (
                 <tr key={it.id} className="border-t border-border/60">
                   <td className="px-2 py-1.5 text-subtle">{idx + 1}</td>
                   <td className="px-2 py-1.5">
-                    <input
-                      className={campo}
-                      defaultValue={it.nome}
-                      onBlur={(e) => {
-                        const v = e.target.value.trim();
-                        if (v && v !== it.nome) {
-                          void atualizarItem(sessao.id, it.id, { nome: v }).then(carregar);
-                        }
-                      }}
-                    />
+                    {editId === it.id ? (
+                      <input
+                        className={campo}
+                        value={editNome}
+                        autoFocus
+                        onChange={(e) => setEditNome(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const v = editNome.trim();
+                            if (v) void atualizarItem(sessao.id, it.id, { nome: v }).then(() => {
+                              setEditId(null);
+                              return carregar();
+                            });
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span>{it.nome}</span>
+                    )}
                   </td>
                   <td className="px-2 py-1.5">
                     <button
@@ -213,6 +188,26 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        aria-label="Editar"
+                        className="flex size-8 items-center justify-center rounded-md text-muted hover:bg-surface-2"
+                        onClick={() => {
+                          if (editId === it.id) {
+                            const v = editNome.trim();
+                            if (!v) return;
+                            void atualizarItem(sessao.id, it.id, { nome: v }).then(() => {
+                              setEditId(null);
+                              return carregar();
+                            }).catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha ao editar"));
+                          } else {
+                            setEditId(it.id);
+                            setEditNome(it.nome);
+                          }
+                        }}
+                      >
+                        <Pencil className="size-4" />
+                      </button>
                       <button
                         type="button"
                         aria-label="Subir"
@@ -236,10 +231,13 @@ function PainelItens({ sessao, onMudou }: { sessao: SessaoCadastro; onMudou: () 
                           variant="danger"
                           className="h-8"
                           onClick={() =>
-                            void excluirItem(sessao.id, it.id).then(() => {
-                              setConfirmId(null);
-                              return carregar();
-                            })
+                            void excluirItem(sessao.id, it.id)
+                              .then(() => {
+                                setConfirmId(null);
+                                setMsg("Item excluído.");
+                                return carregar();
+                              })
+                              .catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha ao excluir"))
                           }
                         >
                           Excluir
@@ -288,6 +286,7 @@ function PainelTipoRendimento({
   const [novo, setNovo] = useState(vazio);
   const [erro, setErro] = useState<string | null>(null);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const ordem = useOrdenacao<"nome" | "origem" | "categoria" | "trib" | "rec" | "irpfm" | "ativo">("nome");
 
   const carregar = useCallback(async () => {
     setItens(await listarTiposRendimento(true));
@@ -370,15 +369,49 @@ function PainelTipoRendimento({
         <table className="min-w-full text-left text-[12px]">
           <thead className="bg-bg text-[11px] uppercase tracking-[0.12em] text-muted">
             <tr>
-              {["Nome", "Origem", "Categoria", "Tributação", "Recolhimento", "IRPFM", "Ativo", ""].map((h) => (
-                <th key={h || "a"} className="px-2 py-2">
-                  {h}
+              {(["nome", "origem", "categoria", "trib", "rec", "irpfm", "ativo"] as const).map((k) => (
+                <th key={k} className="px-2 py-2">
+                  <button type="button" onClick={() => ordem.toggle(k)}>
+                    {k === "nome"
+                      ? "Nome"
+                      : k === "origem"
+                        ? "Origem"
+                        : k === "categoria"
+                          ? "Categoria"
+                          : k === "trib"
+                            ? "Tributação"
+                            : k === "rec"
+                              ? "Recolhimento"
+                              : k === "irpfm"
+                                ? "IRPFM"
+                                : "Ativo"}
+                    {rotuloOrdem(ordem.chave === k, ordem.dir)}
+                  </button>
                 </th>
               ))}
+              <th className="px-2 py-2" />
             </tr>
           </thead>
           <tbody>
-            {itens.map((it) => (
+            {ordem
+              .ordenar(itens, (it, k) =>
+                k === "nome"
+                  ? it.nome
+                  : k === "origem"
+                    ? it.origem
+                    : k === "categoria"
+                      ? it.categoria
+                      : k === "trib"
+                        ? it.tributacao
+                        : k === "rec"
+                          ? it.formaRecolhimento
+                          : k === "irpfm"
+                            ? it.classificacaoIrpfm
+                            : it.ativo
+                              ? 1
+                              : 0,
+              )
+              .map((it) => (
               <tr key={it.id} className="border-t border-border/60">
                 <td className="px-1 py-1">
                   <input

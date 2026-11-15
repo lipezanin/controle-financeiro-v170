@@ -8,17 +8,24 @@ import { formatBRL, formatPct } from "@/lib/financeiro/format";
 import { cn } from "@/lib/utils";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { calcularMotorMensal, type ResumoIrpf } from "@/services/irpf-service";
 
 export const Route = createFileRoute("/irpf")({
+  validateSearch: (s: Record<string, unknown>) => ({
+    tela:
+      s.tela === "fiscal" ? ("fiscal" as const) : s.tela === "relatorio" ? ("relatorio" as const) : ("motor" as const),
+  }),
   component: Pagina,
 });
 
 function Pagina() {
+  const { tela } = Route.useSearch();
   const { periodo } = usePeriodo();
   const [r, setR] = useState<ResumoIrpf | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [mesOrigem, setMesOrigem] = useState(0);
 
   useEffect(() => {
     void calcularMotorMensal(anoDoPeriodo(periodo))
@@ -32,6 +39,67 @@ function Pagina() {
   useMercadoAtualizado(recarregar);
 
   const pisoPct = r ? Math.min(100, (r.baseComputavelAcum / r.isentoAte) * 100) : 0;
+  const ordemOrigem = useOrdenacao<"data" | "origem" | "ativo" | "detalhe" | "valor">("data");
+  const ordemMotor = useOrdenacao<"mes" | "dist" | "demais" | "gc" | "base" | "baseAcum" | "cred" | "credAcum" | "aliq" | "teo" | "escudo" | "teto">("mes");
+  const ordemDarf = useOrdenacao<"mes" | "gcN" | "vendas" | "isento" | "darf15" | "gcFii" | "darfFii" | "gcInt" | "gerado" | "pago" | "apagar" | "status">("mes");
+  const origens = ordemOrigem.ordenar(
+    (r?.origens ?? []).filter((o) => mesOrigem === 0 || o.mes === mesOrigem),
+    (o, k) => (k === "data" ? o.data : k === "origem" ? o.origem : k === "ativo" ? o.ativo : k === "detalhe" ? o.detalhe : o.valor),
+  );
+  const motor = ordemMotor.ordenar(r?.motor ?? [], (l, k) => {
+    if (k === "mes") return l.mes;
+    if (k === "dist") return l.distLucros;
+    if (k === "demais") return l.demaisComputaveis;
+    if (k === "gc") return l.gcObrigatorio;
+    if (k === "base") return l.baseMensal;
+    if (k === "baseAcum") return l.baseAcumulada;
+    if (k === "cred") return l.creditoMensal;
+    if (k === "credAcum") return l.creditoAcumulado;
+    if (k === "aliq") return l.aliquotaEfetiva;
+    if (k === "teo") return l.impostoTeorico;
+    if (k === "escudo") return l.escudoFiscal;
+    return l.tetoAdicional;
+  });
+  const darf = ordemDarf.ordenar(r?.darf ?? [], (l, k) => {
+    if (k === "mes") return l.mes;
+    if (k === "gcN") return l.gcNacional;
+    if (k === "vendas") return l.vendasNacionais;
+    if (k === "isento") return l.isento20k ? 1 : 0;
+    if (k === "darf15") return l.darfNacional;
+    if (k === "gcFii") return l.gcFii;
+    if (k === "darfFii") return l.darfFii;
+    if (k === "gcInt") return l.gcInternacional;
+    if (k === "gerado") return l.darfGerado;
+    if (k === "pago") return l.darfPago;
+    if (k === "apagar") return l.aPagar;
+    return l.status;
+  });
+
+  if (tela === "fiscal") {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <SectionTitle
+          kicker="Imposto"
+          title="Controle fiscal"
+          description="Recolhimentos, DARF e o que já foi pago. O cálculo mês a mês fica em Motor mensal."
+        />
+        <PainelFiscal />
+      </div>
+    );
+  }
+
+  if (tela === "relatorio") {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <SectionTitle
+          kicker="Imposto"
+          title="Relatório ano-base"
+          description="Resumo do ano para a declaração. Não mistura com o motor mensal."
+        />
+        <RelatorioIrpfPainel />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -88,6 +156,52 @@ function Pagina() {
       </div>
 
       <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
+        Origem do cálculo · mês a mês
+      </p>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button type="button" className={cn("rounded-full px-3 py-1 text-xs", mesOrigem === 0 ? "bg-accent text-white" : "bg-surface-2 text-muted")} onClick={() => setMesOrigem(0)}>Ano</button>
+        {(r?.motor ?? []).map((m) => (
+          <button key={m.mes} type="button" className={cn("rounded-full px-3 py-1 text-xs", mesOrigem === m.mes ? "bg-accent text-white" : "bg-surface-2 text-muted")} onClick={() => setMesOrigem(m.mes)}>
+            {m.nome}
+          </button>
+        ))}
+      </div>
+      <div className="overflow-x-auto rounded-[16px] border border-border">
+        <table className="min-w-[720px] w-full border-collapse text-left text-xs">
+          <thead>
+            <tr className="bg-surface-2 text-[11px] uppercase tracking-[0.12em] text-muted">
+              <th className="px-3 py-2"><button type="button" onClick={() => ordemOrigem.toggle("data")}>Data{rotuloOrdem(ordemOrigem.chave === "data", ordemOrigem.dir)}</button></th>
+              <th className="px-3 py-2"><button type="button" onClick={() => ordemOrigem.toggle("origem")}>Origem{rotuloOrdem(ordemOrigem.chave === "origem", ordemOrigem.dir)}</button></th>
+              <th className="px-3 py-2"><button type="button" onClick={() => ordemOrigem.toggle("ativo")}>Ativo{rotuloOrdem(ordemOrigem.chave === "ativo", ordemOrigem.dir)}</button></th>
+              <th className="px-3 py-2"><button type="button" onClick={() => ordemOrigem.toggle("detalhe")}>Detalhe{rotuloOrdem(ordemOrigem.chave === "detalhe", ordemOrigem.dir)}</button></th>
+              <th className="px-3 py-2 text-right"><button type="button" onClick={() => ordemOrigem.toggle("valor")}>Entra na base{rotuloOrdem(ordemOrigem.chave === "valor", ordemOrigem.dir)}</button></th>
+            </tr>
+          </thead>
+          <tbody>
+            {origens.map((o, i) => (
+              <tr key={`${o.data}-${o.ativo}-${i}`} className="border-t border-border/70">
+                <td className="px-3 py-2 font-mono">{o.data.split("-").reverse().join("/")}</td>
+                <td className="px-3 py-2">{o.origem}</td>
+                <td className="px-3 py-2 font-mono">{o.ativo}</td>
+                <td className="px-3 py-2 text-muted">{o.detalhe}</td>
+                <td className="px-3 py-2 text-right font-mono">{formatBRL(o.valor)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mb-6 mt-2 text-xs text-subtle">
+        Soma das linhas
+        {" "}
+        {formatBRL(
+          (r?.origens ?? [])
+            .filter((o) => mesOrigem === 0 || o.mes === mesOrigem)
+            .reduce((s, o) => s + o.valor, 0),
+        )}
+        . Imóvel não entra na base mensal do IRPFM. Consultório entra em distribuição; os demais rendimentos e o ganho obrigatório de venda entram em demais computáveis.
+      </p>
+
+      <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
         Limite mensal de distribuição até o fim do ano
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -138,22 +252,22 @@ function Pagina() {
         <table className="zebra min-w-[1100px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-              <th className="sticky left-0 bg-surface-2 px-3 py-2.5">Mês</th>
-              <th className="px-2 py-2.5 text-right">Distrib. lucros</th>
-              <th className="px-2 py-2.5 text-right">Demais comp.</th>
-              <th className="px-2 py-2.5 text-right">GC obrig.</th>
-              <th className="px-2 py-2.5 text-right">Base mensal</th>
-              <th className="px-2 py-2.5 text-right">Base acum.</th>
-              <th className="px-2 py-2.5 text-right">Créd. mês</th>
-              <th className="px-2 py-2.5 text-right">Créd. acum.</th>
-              <th className="px-2 py-2.5 text-right">Alíq.</th>
-              <th className="px-2 py-2.5 text-right">Imp. teórico</th>
-              <th className="px-2 py-2.5 text-right">Escudo</th>
-              <th className="px-2 py-2.5 text-right">Teto</th>
+              <th className="sticky left-0 bg-surface-2 px-3 py-2.5"><button type="button" onClick={() => ordemMotor.toggle("mes")}>Mês{rotuloOrdem(ordemMotor.chave === "mes", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("dist")}>Distrib. lucros{rotuloOrdem(ordemMotor.chave === "dist", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("demais")}>Demais comp.{rotuloOrdem(ordemMotor.chave === "demais", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("gc")}>GC obrig.{rotuloOrdem(ordemMotor.chave === "gc", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("base")}>Base mensal{rotuloOrdem(ordemMotor.chave === "base", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("baseAcum")}>Base acum.{rotuloOrdem(ordemMotor.chave === "baseAcum", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("cred")}>Créd. mês{rotuloOrdem(ordemMotor.chave === "cred", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("credAcum")}>Créd. acum.{rotuloOrdem(ordemMotor.chave === "credAcum", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("aliq")}>Alíq.{rotuloOrdem(ordemMotor.chave === "aliq", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("teo")}>Imp. teórico{rotuloOrdem(ordemMotor.chave === "teo", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("escudo")}>Escudo{rotuloOrdem(ordemMotor.chave === "escudo", ordemMotor.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemMotor.toggle("teto")}>Teto{rotuloOrdem(ordemMotor.chave === "teto", ordemMotor.dir)}</button></th>
             </tr>
           </thead>
           <tbody>
-            {(r?.motor ?? []).map((l) => {
+            {motor.map((l) => {
               const atual = r?.mesAtual === l.mes;
               return (
                 <tr key={l.mes} className={atual ? "bg-accent/10" : undefined}>
@@ -186,22 +300,22 @@ function Pagina() {
         <table className="zebra min-w-[1100px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-              <th className="sticky left-0 bg-surface-2 px-3 py-2.5">Mês</th>
-              <th className="px-2 py-2.5 text-right">GC nacional</th>
-              <th className="px-2 py-2.5 text-right">Vendas nac.</th>
-              <th className="px-2 py-2.5">Isento ≤20k?</th>
-              <th className="px-2 py-2.5 text-right">DARF 15%</th>
-              <th className="px-2 py-2.5 text-right">GC FIIs</th>
-              <th className="px-2 py-2.5 text-right">DARF FII</th>
-              <th className="px-2 py-2.5 text-right">GC intl</th>
-              <th className="px-2 py-2.5 text-right">DARF gerado</th>
-              <th className="px-2 py-2.5 text-right">Pago</th>
-              <th className="px-2 py-2.5 text-right">A pagar</th>
-              <th className="px-2 py-2.5">Status</th>
+              <th className="sticky left-0 bg-surface-2 px-3 py-2.5"><button type="button" onClick={() => ordemDarf.toggle("mes")}>Mês{rotuloOrdem(ordemDarf.chave === "mes", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("gcN")}>GC nacional{rotuloOrdem(ordemDarf.chave === "gcN", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("vendas")}>Vendas nac.{rotuloOrdem(ordemDarf.chave === "vendas", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5"><button type="button" onClick={() => ordemDarf.toggle("isento")}>Isento ≤20k?{rotuloOrdem(ordemDarf.chave === "isento", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("darf15")}>DARF 15%{rotuloOrdem(ordemDarf.chave === "darf15", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("gcFii")}>GC FIIs{rotuloOrdem(ordemDarf.chave === "gcFii", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("darfFii")}>DARF FII{rotuloOrdem(ordemDarf.chave === "darfFii", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("gcInt")}>GC intl{rotuloOrdem(ordemDarf.chave === "gcInt", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("gerado")}>DARF gerado{rotuloOrdem(ordemDarf.chave === "gerado", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("pago")}>Pago{rotuloOrdem(ordemDarf.chave === "pago", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordemDarf.toggle("apagar")}>A pagar{rotuloOrdem(ordemDarf.chave === "apagar", ordemDarf.dir)}</button></th>
+              <th className="px-2 py-2.5"><button type="button" onClick={() => ordemDarf.toggle("status")}>Status{rotuloOrdem(ordemDarf.chave === "status", ordemDarf.dir)}</button></th>
             </tr>
           </thead>
           <tbody>
-            {(r?.darf ?? []).map((l) => {
+            {darf.map((l) => {
               const atual = r?.mesAtual === l.mes;
               return (
                 <tr key={l.mes} className={atual ? "bg-accent/10" : undefined}>
@@ -240,9 +354,6 @@ function Pagina() {
         acumulada. Acima de R$ 1,2 milhão → 10%. Vendas nacionais de RV até R$ 20 mil/mês ficam isentas
         de DARF 15%. FIIs recolhem 20% sem isenção.
       </p>
-
-      <PainelFiscal />
-      <RelatorioIrpfPainel />
     </div>
   );
 }

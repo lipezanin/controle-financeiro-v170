@@ -6,6 +6,7 @@
 import { consultar, executar, getDb, salvarDb } from "@/lib/financeiro/db";
 import { type Periodo } from "@/lib/financeiro/periodo";
 import { resumirPatrimonio } from "@/services/patrimonio-service";
+import { SQL_COMPRAS } from "@/lib/financeiro/imovel";
 import { resumirRentabilidade } from "@/services/rentabilidade-service";
 
 export type PontoEvolucao = {
@@ -34,45 +35,69 @@ export async function gravarSnapshotPatrimonio(): Promise<void> {
   await salvarDb();
 }
 
+function mesChave(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  const iso = s.match(/^(\d{4})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2]}`;
+  return null;
+}
+
 export async function evolucaoPatrimonio(periodo?: Periodo): Promise<PontoEvolucao[]> {
   const db = await getDb();
   const fluxos = consultar(
     db,
-    `SELECT substr(data,1,7) AS mes, SUM(valor_brl) AS v
+    `SELECT data AS d, valor_brl AS v
      FROM transacoes
-     WHERE tipo_operacao IN ('Compra','Parcela Imóvel','ITBI / Cartório')
-     GROUP BY mes
+     WHERE tipo_operacao IN ${SQL_COMPRAS}
      UNION ALL
-     SELECT substr(data,1,7) AS mes, -SUM(valor_brl) AS v
-     FROM transacoes WHERE tipo_operacao = 'Venda'
-     GROUP BY mes
+     SELECT data AS d, -valor_brl AS v
+     FROM transacoes WHERE tipo_operacao IN ('Venda','Venda de imóvel','Doação de imóvel','Doação realizada')
      UNION ALL
-     SELECT substr(data_aplicacao,1,7) AS mes, SUM(valor_aplicado) AS v
+     SELECT data_aplicacao AS d, valor_aplicado AS v
      FROM renda_fixa
      WHERE tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0
-       AND COALESCE(status, 'Ativo') <> 'Resgatado'
-     GROUP BY mes`,
+     UNION ALL
+     SELECT data_aplicacao AS d, valor_aplicado AS v
+     FROM renda_fixa
+     WHERE tipo_movimento = 'Resgate parcial' AND COALESCE(valor_aplicado, 0) > 0
+     UNION ALL
+     SELECT data_resgate AS d, -COALESCE(valor_aplicado, 0) AS v
+     FROM renda_fixa
+     WHERE tipo_movimento = 'Resgate parcial' AND data_resgate IS NOT NULL AND TRIM(data_resgate) <> ''
+     UNION ALL
+     SELECT data_resgate AS d, -COALESCE(valor_aplicado, 0) AS v
+     FROM renda_fixa
+     WHERE status = 'Resgatado' AND data_resgate IS NOT NULL AND TRIM(data_resgate) <> ''`,
   );
   const porMes = new Map<string, number>();
   for (const r of fluxos) {
-    const mes = String(r.mes ?? "");
-    if (!/^\d{4}-\d{2}$/.test(mes)) continue;
+    const mes = mesChave(r.d);
+    if (!mes) continue;
     porMes.set(mes, (porMes.get(mes) ?? 0) + num(r.v));
   }
   const snaps = consultar(db, `SELECT data, mercado FROM snapshots_patrimonio ORDER BY data`);
   const mercadoPorMes = new Map<string, number>();
   for (const s of snaps) {
-    const mes = String(s.data ?? "").slice(0, 7);
-    mercadoPorMes.set(mes, num(s.mercado));
+    const mes = mesChave(s.data);
+    if (mes) mercadoPorMes.set(mes, num(s.mercado));
   }
   const meses = [...porMes.keys()].sort();
   if (!meses.length) return [];
-  const [y0, m0] = meses[0].split("-").map(Number);
   const hoje = new Date();
   const y1 = hoje.getFullYear();
   const m1 = hoje.getMonth() + 1;
+  let [y0, m0] = meses[0].split("-").map(Number);
+  if (y0 < y1 - 15) {
+    y0 = y1 - 15;
+    m0 = 1;
+  }
   const out: PontoEvolucao[] = [];
   let custo = 0;
+  for (const [mes, valor] of [...porMes.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    if (mes < `${y0}-${String(m0).padStart(2, "0")}`) custo += valor;
+  }
   let y = y0;
   let m = m0;
   while (y < y1 || (y === y1 && m <= m1)) {
@@ -92,36 +117,26 @@ export async function evolucaoPatrimonio(periodo?: Periodo): Promise<PontoEvoluc
   }
   let ultimoMercado: number | null = null;
   for (const p of out) {
-    if (p.mercado != null && p.mercado > 0) ultimoMercado = p.mercado;
-    else p.mercado = ultimoMercado ?? p.custo;
-  }
-  if (out.length) {
-    const cotado = num(
-      consultar(
-        db,
-        `SELECT COALESCE(SUM(
-            CASE WHEN c.preco > 0 AND COALESCE(t.qtd_acumulada, 0) > 0
-              THEN t.qtd_acumulada * c.preco
-              ELSE COALESCE(t.custo_acum_brl, 0) END
-          ), 0) AS v
-         FROM transacoes t
-         INNER JOIN (
-           SELECT ticker, categoria, MAX(id) AS id FROM transacoes
-           WHERE ticker IS NOT NULL GROUP BY ticker, categoria
-         ) u ON u.id = t.id
-         LEFT JOIN cotacoes_ativos c ON UPPER(c.ticker) = UPPER(t.ticker)`,
-      )[0]?.v,
-    );
-    if (cotado > 0) out[out.length - 1].mercado = cotado;
+    const bruto = p.mercado;
+    if (bruto != null && bruto > 0) {
+      const quedaFalsa =
+        ultimoMercado != null &&
+        p.custo > 0 &&
+        bruto < ultimoMercado * 0.5 &&
+        bruto < p.custo * 0.5;
+      if (!quedaFalsa) ultimoMercado = bruto;
+    }
+    p.mercado = ultimoMercado;
   }
   if (periodo && periodo.modo !== "tudo") {
-    return out.filter((p) => {
-      if (periodo.modo === "ano") return p.data.startsWith(String(periodo.ano));
-      if (periodo.modo === "mes") {
-        return p.data === `${periodo.ano}-${String(periodo.mes).padStart(2, "0")}`;
-      }
-      return p.data === String(periodo.data).slice(0, 7);
-    });
+    const limite =
+      periodo.modo === "ano"
+        ? `${periodo.ano}-12`
+        : periodo.modo === "mes"
+          ? `${periodo.ano}-${String(periodo.mes).padStart(2, "0")}`
+          : String(periodo.data).slice(0, 7);
+    const inicio = periodo.modo === "ano" ? `${periodo.ano}-01` : "0000-00";
+    return out.filter((p) => p.data >= inicio && p.data <= limite);
   }
   return out;
 }

@@ -6,7 +6,7 @@
  */
 
 import type { Database } from "sql.js";
-import { consultar, executar, getDb, salvarDb, type LinhaSql } from "@/lib/financeiro/db";
+import { consultar, executar, getDb, salvarDb, apagarComTombstone, type LinhaSql } from "@/lib/financeiro/db";
 import { buscarSerieSgs, atualizarTaxas } from "@/services/taxas-service";
 import { casarTesouro, listarPrecosTesouro, type PrecoTesouro } from "@/services/tesouro-service";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
@@ -60,6 +60,71 @@ function aliquotaIrRf(dias: number): number {
   if (dias <= 360) return 0.2;
   if (dias <= 720) return 0.175;
   return 0.15;
+}
+
+export type SimulacaoResgate = {
+  fracao: number;
+  valorBruto: number;
+  principalSai: number;
+  principalFica: number;
+  rendimento: number;
+  iof: number;
+  ir: number;
+  liquido: number;
+  aliquotaIr: number;
+  aliquotaIof: number;
+  dias: number;
+  isento: boolean;
+  mercadoFica: number;
+};
+
+/**
+ * Resgate parcial pelo método proporcional.
+ * A parte que sai leva a mesma fração do principal e do rendimento.
+ * IR só sobre o rendimento: Lei 11.033/2004 (22,5% até 180 dias, 20% até 360,
+ * 17,5% até 720 e 15% depois). IOF só sobre o rendimento nos primeiros 30 dias:
+ * Decreto 6.306/2007. LCI, LCA, CRI, CRA, debênture incentivada e poupança não têm IR.
+ */
+export function simularResgateParcial(input: {
+  dataAplicacao: string | null;
+  data: string;
+  valorAplicado: number;
+  valorMercado: number | null;
+  valorBruto: number;
+  isento: boolean;
+}): SimulacaoResgate {
+  const aplicado = Math.max(0, input.valorAplicado);
+  const mercado = input.valorMercado != null && input.valorMercado > 0 ? input.valorMercado : aplicado;
+  const brutoPosicao = Math.max(mercado, aplicado);
+  if (!input.data) throw new Error("Informe a data do resgate.");
+  if (!(input.valorBruto > 0)) throw new Error("Informe o valor bruto resgatado, antes de IR e IOF.");
+  if (!(brutoPosicao > 0)) throw new Error("Este título não tem valor para resgatar.");
+  if (input.valorBruto >= brutoPosicao - 0.009) {
+    throw new Error("Esse valor cobre o título inteiro. Use Liquidar.");
+  }
+  const fracao = input.valorBruto / brutoPosicao;
+  const principalSai = aplicado * fracao;
+  const rendimento = Math.max(0, input.valorBruto - principalSai);
+  const dias = input.dataAplicacao ? diasCorridos(input.dataAplicacao, input.data) : 0;
+  const aliquotaIofPct = aliquotaIof(dias || 1);
+  const aliquotaIrPct = input.isento ? 0 : aliquotaIrRf(dias || 1);
+  const iof = rendimento * aliquotaIofPct;
+  const ir = Math.max(0, rendimento - iof) * aliquotaIrPct;
+  return {
+    fracao,
+    valorBruto: input.valorBruto,
+    principalSai,
+    principalFica: aplicado - principalSai,
+    rendimento,
+    iof,
+    ir,
+    liquido: input.valorBruto - iof - ir,
+    aliquotaIr: aliquotaIrPct,
+    aliquotaIof: aliquotaIofPct,
+    dias,
+    isento: input.isento,
+    mercadoFica: mercado * (1 - fracao),
+  };
 }
 
 export type TituloRf = {
@@ -338,15 +403,17 @@ export async function resgatarTituloRf(
   const ir = Math.max(0, irRetido);
   const lucroLiquido = valorLiquido - aplicado;
   const lucroBruto = lucroLiquido + ir;
+  const isento = num(campo(row, "isencao_ir")) === 1;
+  const computavel = isento ? 0 : Math.max(0, lucroBruto);
   executar(
     db,
     `UPDATE renda_fixa
      SET status = 'Resgatado', data_resgate = ?, valor_liq_recebido = ?, valor_resgatado = ?,
-         tipo_resgate = 'Vencimento', valor_mercado = 0
+         ir_pago = ?, tipo_resgate = 'Vencimento', valor_mercado = 0
      WHERE id = ?`,
-    [data, valorLiquido, valorLiquido, id],
+    [data, valorLiquido, valorLiquido + ir, ir, id],
   );
-  if (lucroBruto > 0.004) {
+  if (lucroBruto > 0.004 || computavel > 0.004) {
     const ticker = str(campo(row, "ticker")) || str(campo(row, "nome")) || null;
     executar(
       db,
@@ -356,10 +423,10 @@ export async function resgatarTituloRf(
         ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data,
-        lucroBruto,
-        lucroBruto,
+        Math.max(0, lucroBruto),
+        Math.max(0, lucroBruto),
         Math.max(0, lucroLiquido),
-        lucroBruto,
+        computavel,
         ir,
         ticker,
         str(campo(row, "instituicao")) || null,
@@ -369,4 +436,107 @@ export async function resgatarTituloRf(
   }
   await salvarDb();
   return { lucro: lucroLiquido };
+}
+
+/** Resgate de parte do título. O que fica continua aplicado, com custo e mercado reduzidos na mesma fração. */
+export async function resgatarParcialTituloRf(
+  id: number,
+  data: string,
+  valorBruto: number,
+): Promise<SimulacaoResgate> {
+  const db = await getDb();
+  const row = consultar(db, `SELECT * FROM renda_fixa WHERE id = ?`, [id])[0];
+  if (!row) throw new Error("Título não encontrado.");
+  if (str(campo(row, "status")) === "Resgatado") throw new Error("Este título já foi liquidado.");
+  if (str(campo(row, "tipo_movimento")) !== "Aplicação") throw new Error("Só dá para resgatar uma aplicação ativa.");
+  const sim = simularResgateParcial({
+    dataAplicacao: str(campo(row, "data_aplicacao")) || null,
+    data,
+    valorAplicado: num(campo(row, "valor_aplicado")),
+    valorMercado: campo(row, "valor_mercado") == null ? null : num(campo(row, "valor_mercado")),
+    valorBruto,
+    isento: num(campo(row, "isencao_ir")) === 1,
+  });
+  const qtd = num(campo(row, "qtd_tesouro"));
+  const qtdFica = qtd > 0 ? qtd * (1 - sim.fracao) : null;
+  executar(
+    db,
+    `UPDATE renda_fixa
+     SET valor_aplicado = ?, valor_mercado = ?, qtd_tesouro = ?, atualizado_em = ?
+     WHERE id = ?`,
+    [sim.principalFica, sim.mercadoFica, qtdFica, new Date().toISOString(), id],
+  );
+  executar(
+    db,
+    `INSERT INTO renda_fixa (
+        nome, ticker, tipo_movimento, tipo_rf, emissor, instituicao, indexador, taxa,
+        data_aplicacao, valor_aplicado, data_vencimento, liquidez, amortizacao, isencao_ir,
+        status, data_resgate, tipo_resgate, valor_resgatado, ir_pago, valor_liq_recebido,
+        lancado_rendimentos, iof_brl, origem, moeda
+      ) VALUES (?, ?, 'Resgate parcial', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Histórico', ?, 'Resgate parcial', ?, ?, ?, 1, ?, ?, 'BRL')`,
+    [
+      str(campo(row, "nome")) || null,
+      str(campo(row, "ticker")) || null,
+      str(campo(row, "tipo_rf")) || null,
+      str(campo(row, "emissor")) || null,
+      str(campo(row, "instituicao")) || null,
+      str(campo(row, "indexador")) || null,
+      campo(row, "taxa") == null ? null : num(campo(row, "taxa")),
+      str(campo(row, "data_aplicacao")) || null,
+      sim.principalSai,
+      str(campo(row, "data_vencimento")) || null,
+      str(campo(row, "liquidez")) || null,
+      str(campo(row, "amortizacao")) || null,
+      num(campo(row, "isencao_ir")),
+      data,
+      sim.valorBruto,
+      sim.ir,
+      sim.principalSai,
+      sim.iof,
+      str(campo(row, "origem")) || "Nacional",
+    ],
+  );
+  if (sim.rendimento > 0.004) {
+    const ticker = str(campo(row, "ticker")) || str(campo(row, "nome")) || null;
+    const computavel = sim.isento ? 0 : Math.max(0, sim.rendimento - sim.iof);
+    executar(
+      db,
+      `INSERT INTO rendimentos (
+          data, tipo, categoria, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
+          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao
+        ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data,
+        sim.rendimento,
+        sim.rendimento,
+        Math.max(0, sim.rendimento - sim.iof - sim.ir),
+        computavel,
+        sim.ir,
+        ticker,
+        str(campo(row, "instituicao")) || null,
+        `Liquidação parcial ${ticker ?? "renda fixa"} · bruto ${sim.valorBruto.toFixed(2)} · principal ${sim.principalSai.toFixed(2)} · rendimento ${sim.rendimento.toFixed(2)} · IOF ${sim.iof.toFixed(2)} · IR ${sim.ir.toFixed(2)}`,
+      ],
+    );
+  }
+  await salvarDb();
+  return sim;
+}
+
+export async function excluirTituloRf(id: number): Promise<void> {
+  const db = await getDb();
+  apagarComTombstone(db, "renda_fixa", [id]);
+  await salvarDb();
+}
+
+export async function atualizarTituloRf(
+  id: number,
+  input: { dataAplicacao: string; valorAplicado: number; ticker: string; emissor: string },
+): Promise<void> {
+  const db = await getDb();
+  executar(
+    db,
+    `UPDATE renda_fixa SET data_aplicacao = ?, valor_aplicado = ?, ticker = ?, emissor = ? WHERE id = ?`,
+    [input.dataAplicacao, input.valorAplicado, input.ticker.trim(), input.emissor.trim() || null, id],
+  );
+  await salvarDb();
 }

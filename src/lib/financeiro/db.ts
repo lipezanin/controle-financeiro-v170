@@ -157,6 +157,38 @@ function migrarSchema(db: Database): void {
   garantirColuna(db, "renda_fixa", "tipo_resgate", "TEXT");
   garantirColuna(db, "renda_fixa", "status", "TEXT");
   db.run(`
+    CREATE TABLE IF NOT EXISTS caixa_cambio (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data TEXT NOT NULL,
+      moeda TEXT NOT NULL DEFAULT 'USD',
+      tipo TEXT NOT NULL,
+      quantidade REAL NOT NULL,
+      custo_brl REAL NOT NULL DEFAULT 0,
+      iof_brl REAL NOT NULL DEFAULT 0,
+      spread_brl REAL NOT NULL DEFAULT 0,
+      cotacao REAL,
+      descricao TEXT
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS tickers_catalogo (
+      simbolo TEXT PRIMARY KEY,
+      nome TEXT,
+      categoria TEXT NOT NULL,
+      atualizado_em TEXT
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS metas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      metrica TEXT NOT NULL,
+      alvo REAL NOT NULL,
+      ate TEXT,
+      created_at TEXT
+    )
+  `);
+  db.run(`
     CREATE TABLE IF NOT EXISTS snapshots_patrimonio (
       data TEXT PRIMARY KEY,
       custo REAL,
@@ -175,6 +207,22 @@ function migrarSchema(db: Database): void {
       ajustou_livro INTEGER NOT NULL DEFAULT 0
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS exclusoes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tabela TEXT NOT NULL,
+      local_id INTEGER NOT NULL,
+      deleted_at TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      nuvem TEXT NOT NULL DEFAULT 'pendente',
+      UNIQUE (tabela, local_id)
+    )
+  `);
+  garantirColuna(db, "exclusoes", "nuvem", "TEXT");
+  db.run(`UPDATE transacoes SET tipo_operacao = 'Venda de imóvel'
+    WHERE tipo_operacao = 'Venda' AND categoria IN ('Imóvel','Imóveis')`);
+  db.run(`UPDATE transacoes SET tipo_operacao = 'Doação de imóvel'
+    WHERE tipo_operacao = 'Doação realizada' AND categoria IN ('Imóvel','Imóveis')`);
   db.run("INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES ('cobertura_fiscal_min', '0.80')");
   const tabelasSync = [
     "configuracoes",
@@ -204,6 +252,7 @@ function migrarSchema(db: Database): void {
   }
   db.exec(syncTriggersSql);
   aplicarSchemaCadastros(db);
+  deduplicarEspelhos(db);
   db.run(`
     CREATE TABLE IF NOT EXISTS historico_cotacoes (
       ticker TEXT NOT NULL,
@@ -226,6 +275,63 @@ function migrarSchema(db: Database): void {
     )
   `);
   db.run("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('schema_versao', '11')");
+}
+
+/** Devolve a instância única do SQLite, criando o schema na primeira vez. */
+function deduplicarEspelhos(db: Database): void {
+  const apagar = (tabela: string, grupo: string) => {
+    db.run(
+      `DELETE FROM ${tabela} WHERE id NOT IN (SELECT MIN(id) FROM ${tabela} GROUP BY ${grupo})`,
+    );
+  };
+  apagar(
+    "renda_fixa",
+    "COALESCE(ticker,''), COALESCE(data_aplicacao,''), ROUND(COALESCE(valor_aplicado,0), 2), COALESCE(tipo_rf,''), COALESCE(emissor,''), COALESCE(data_vencimento,'')",
+  );
+  apagar(
+    "rendimentos",
+    "COALESCE(data,''), COALESCE(tipo,''), COALESCE(ticker,''), COALESCE(descricao,''), COALESCE(instituicao,''), ROUND(COALESCE(valor_liquido, valor_bruto_brl, 0), 2)",
+  );
+  apagar(
+    "transacoes",
+    "COALESCE(data,''), COALESCE(tipo_operacao,''), COALESCE(ticker,''), COALESCE(categoria,''), COALESCE(nota,''), ROUND(COALESCE(quantidade,0), 6), ROUND(COALESCE(valor_brl,0), 2)",
+  );
+  db.run(`UPDATE caixa_fisico SET tipo = 'Saque'
+    WHERE COALESCE(tipo,'') != 'Saque'
+      AND lower(replace(replace(replace(COALESCE(tipo,''),'ó','o'),'Ó','o'),'á','a')) IN ('saque','retirada','saida')`);
+  db.run(`UPDATE caixa_fisico SET tipo = 'Depósito'
+    WHERE COALESCE(tipo,'') != 'Depósito'
+      AND lower(replace(replace(replace(COALESCE(tipo,''),'ó','o'),'Ó','o'),'á','a')) NOT IN ('saque','retirada','saida')`);
+  db.run(`UPDATE caixa_fisico SET data = substr(data, 1, 10) WHERE data LIKE '____-__-__%' AND length(data) > 10`);
+  db.run(`UPDATE caixa_fisico SET data = '2026-10-28'
+    WHERE ABS(ROUND(COALESCE(valor, 0), 2) - 11400) < 0.02
+      AND (substr(COALESCE(data,''), 1, 10) = '2024-10-28' OR data LIKE '28/10/2024%')`);
+  db.run(`UPDATE caixa_fisico SET data = printf('%s-%s-%s', substr(data, 7, 4), substr(data, 4, 2), substr(data, 1, 2))
+    WHERE data LIKE '__/__/____%'`);
+  apagar(
+    "caixa_fisico",
+    "COALESCE(substr(data,1,10),''), tipo, ROUND(COALESCE(valor,0), 2), COALESCE(descricao,''), COALESCE(observacao,'')",
+  );
+}
+
+/** Guarda a exclusão e tira a linha do livro. A nuvem não pode recolocar essa operação. */
+export function apagarComTombstone(db: Database, tabela: string, ids: number[]): void {
+  if (!ids.length) return;
+  const ph = ids.map(() => "?").join(",");
+  const rows = consultar(db, `SELECT * FROM ${tabela} WHERE id IN (${ph})`, ids);
+  const agora = new Date().toISOString();
+  for (const r of rows) {
+    const id = Number(r.id);
+    const payload = JSON.stringify({ ...r, deleted_at: agora, updated_at: agora, sync_status: "pending" });
+    executar(db, `DELETE FROM exclusoes WHERE tabela = ? AND local_id = ?`, [tabela, id]);
+    executar(db, `INSERT INTO exclusoes (tabela, local_id, deleted_at, payload) VALUES (?,?,?,?)`, [
+      tabela,
+      id,
+      agora,
+      payload,
+    ]);
+  }
+  executar(db, `DELETE FROM ${tabela} WHERE id IN (${ph})`, ids);
 }
 
 /** Devolve a instância única do SQLite, criando o schema na primeira vez. */

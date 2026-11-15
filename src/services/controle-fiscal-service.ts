@@ -12,7 +12,7 @@ import { consultar, executar, getDb, salvarDb, type LinhaSql } from "@/lib/finan
 import { MESES_CURTOS } from "@/services/irpf-service";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
-const COMPRAS = "('Compra','Parcela Imóvel','ITBI / Cartório')";
+import { SQL_COMPRAS } from "@/lib/financeiro/imovel";
 const LIMIAR_PADRAO = 0.8;
 
 function num(v: unknown): number {
@@ -100,7 +100,7 @@ export async function resumirControleFiscal(anoForcado?: number): Promise<Resumo
 
   const compras: { data: unknown; valor: number }[] = consultar(
     db,
-    `SELECT data, valor_brl AS v FROM transacoes WHERE tipo_operacao IN ${COMPRAS}`,
+    `SELECT data, valor_brl AS v FROM transacoes WHERE tipo_operacao IN ${SQL_COMPRAS}`,
   ).map((r) => ({ data: campo(r, "data"), valor: num(campo(r, "v")) }));
 
   const vendas: { data: unknown; valor: number }[] = consultar(
@@ -126,7 +126,7 @@ export async function resumirControleFiscal(anoForcado?: number): Promise<Resumo
   const rf: { data: unknown; valor: number }[] = consultar(
     db,
     `SELECT data_aplicacao AS data, valor_aplicado AS v FROM renda_fixa
-     WHERE tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0`,
+     WHERE tipo_movimento IN ('Aplicação', 'Resgate parcial') AND COALESCE(valor_aplicado, 0) > 0`,
   ).map((r) => ({ data: campo(r, "data"), valor: num(campo(r, "v")) }));
 
   const rendRows = consultar(

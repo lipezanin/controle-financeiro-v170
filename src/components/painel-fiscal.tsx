@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { GraficoRendimentosAportes } from "@/components/graficos-financeiro";
 import { KpiCard } from "@/components/kpi-card";
@@ -28,6 +29,7 @@ export function PainelFiscal() {
   const [r, setR] = useState<ResumoFiscal | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [limiarPct, setLimiarPct] = useState("80");
+  const ordem = useOrdenacao<"mes" | "rend" | "aport" | "resg" | "prov" | "gc" | "cons" | "pat">("mes");
 
   const carregar = useCallback(() => {
     void resumirControleFiscal(anoDoPeriodo(periodo))
@@ -167,18 +169,36 @@ export function PainelFiscal() {
         <table className="zebra min-w-[960px] w-full border-collapse text-left text-xs">
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-              <th className="px-3 py-2.5">Mês</th>
-              <th className="px-2 py-2.5 text-right">Rendimentos</th>
-              <th className="px-2 py-2.5 text-right">Aportes</th>
-              <th className="px-2 py-2.5 text-right">Resgates</th>
-              <th className="px-2 py-2.5 text-right">Proventos</th>
-              <th className="px-2 py-2.5 text-right">GC</th>
-              <th className="px-2 py-2.5 text-right">Consistência</th>
-              <th className="px-2 py-2.5 text-right">Patrimônio acum.</th>
+              <th className="px-3 py-2.5"><button type="button" onClick={() => ordem.toggle("mes")}>Mês{rotuloOrdem(ordem.chave === "mes", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("rend")}>Rendimentos{rotuloOrdem(ordem.chave === "rend", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("aport")}>Aportes{rotuloOrdem(ordem.chave === "aport", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("resg")}>Resgates{rotuloOrdem(ordem.chave === "resg", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("prov")}>Proventos{rotuloOrdem(ordem.chave === "prov", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("gc")}>GC{rotuloOrdem(ordem.chave === "gc", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("cons")}>Consistência{rotuloOrdem(ordem.chave === "cons", ordem.dir)}</button></th>
+              <th className="px-2 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("pat")}>Patrimônio acum.{rotuloOrdem(ordem.chave === "pat", ordem.dir)}</button></th>
             </tr>
           </thead>
           <tbody>
-            {(r?.meses ?? []).map((m) => (
+            {ordem
+              .ordenar(r?.meses ?? [], (m, k) =>
+                k === "mes"
+                  ? m.mes
+                  : k === "rend"
+                    ? m.rendimentos
+                    : k === "aport"
+                      ? m.aportes
+                      : k === "resg"
+                        ? m.resgates
+                        : k === "prov"
+                          ? m.proventos
+                          : k === "gc"
+                            ? m.gcRealizado
+                            : k === "cons"
+                              ? m.consistencia
+                              : m.patrimonioAcum,
+              )
+              .map((m) => (
               <tr key={m.mes}>
                 <td className="px-3 py-2 font-medium">{m.nome}</td>
                 <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(m.rendimentos)}</td>

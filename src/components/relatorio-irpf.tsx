@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePeriodo } from "@/hooks/periodo-context";
 import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
+import { rotuloOrdem, useOrdenacao } from "@/hooks/use-ordenacao";
 import { anoDoPeriodo } from "@/lib/financeiro/periodo";
 import { KpiCard } from "@/components/kpi-card";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ export function RelatorioIrpfPainel() {
   const { periodo } = usePeriodo();
   const [r, setR] = useState<RelatorioIrpf | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const ordem = useOrdenacao<"tipo" | "valor">("tipo");
 
   const carregar = useCallback(() => {
     void montarRelatorioIrpf(anoDoPeriodo(periodo))
@@ -74,12 +76,12 @@ export function RelatorioIrpfPainel() {
           <table className="zebra min-w-[360px] w-full border-collapse text-left text-xs">
             <thead>
               <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
-                <th className="px-3 py-2.5">Tipo de rendimento</th>
-                <th className="px-3 py-2.5 text-right">Valor</th>
+                <th className="px-3 py-2.5"><button type="button" onClick={() => ordem.toggle("tipo")}>Tipo de rendimento{rotuloOrdem(ordem.chave === "tipo", ordem.dir)}</button></th>
+                <th className="px-3 py-2.5 text-right"><button type="button" onClick={() => ordem.toggle("valor")}>Valor{rotuloOrdem(ordem.chave === "valor", ordem.dir)}</button></th>
               </tr>
             </thead>
             <tbody>
-              {r.porTipo.map((t) => (
+              {ordem.ordenar(r.porTipo, (t, k) => (k === "tipo" ? t.tipo : t.valor)).map((t) => (
                 <tr key={t.tipo}>
                   <td className="px-3 py-2">{t.tipo}</td>
                   <td className="px-3 py-2 text-right font-mono tabular">{formatBRL(t.valor)}</td>

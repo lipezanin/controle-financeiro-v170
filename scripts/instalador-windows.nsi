@@ -16,7 +16,10 @@ SetCompressor /SOLID lzma
 !include "x64.nsh"
 
 !ifndef APPVER
-  !define APPVER "2.0.0"
+  !define APPVER "2.0.008"
+!endif
+!ifndef APPVERNUM
+  !define APPVERNUM "${APPVER}.0"
 !endif
 
 Name "Controle Financeiro ${APPVER}"
@@ -38,7 +41,7 @@ BrandingText "Controle Financeiro ${APPVER}"
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "PortugueseBR"
 
-VIProductVersion "${APPVER}.0"
+VIProductVersion "${APPVERNUM}"
 VIAddVersionKey /LANG=1046 "ProductName" "Controle Financeiro"
 VIAddVersionKey /LANG=1046 "FileDescription" "Instalador do Controle Financeiro"
 VIAddVersionKey /LANG=1046 "FileVersion" "${APPVER}"

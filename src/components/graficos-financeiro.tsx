@@ -1,4 +1,7 @@
+import { useState, type ReactNode } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -9,6 +12,7 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
+  Sector,
   Tooltip,
   XAxis,
   YAxis,
@@ -23,12 +27,54 @@ function eixoReais(v: number): string {
 }
 
 const tooltip = {
-  background: CORES.card,
-  border: `1px solid ${CORES.borda}`,
+  background: "#0f172a",
+  border: "1px solid #334155",
   borderRadius: 8,
-  color: CORES.texto,
+  color: "#ffffff",
   fontSize: 12,
 };
+
+function TooltipBranco({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: { name?: string; value?: number }[];
+}): ReactNode {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md bg-slate-950 px-3 py-1.5 text-xs text-white">
+      {payload.map((p) => (
+        <p key={String(p.name)} className="text-white">
+          {p.name}: {typeof p.value === "number" ? formatBRL(p.value) : "—"}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function fatiaAmpliada(props: {
+  cx?: number;
+  cy?: number;
+  innerRadius?: number;
+  outerRadius?: number;
+  startAngle?: number;
+  endAngle?: number;
+  fill?: string;
+}) {
+  const { cx = 0, cy = 0, innerRadius = 0, outerRadius = 0, startAngle = 0, endAngle = 0, fill } = props;
+  return (
+    <Sector
+      cx={cx}
+      cy={cy}
+      innerRadius={innerRadius}
+      outerRadius={outerRadius + 16}
+      startAngle={startAngle}
+      endAngle={endAngle}
+      fill={fill}
+    />
+  );
+}
 
 export function GraficoRendimentosAportes({
   dados,
@@ -184,6 +230,7 @@ export function GraficoDonut({
   const visiveis = dados.filter((d) => d.valor > 0);
   const total = visiveis.reduce((s, d) => s + d.valor, 0);
   const serie = visiveis.map((d, i) => ({ ...d, cor: corClasse(i) }));
+  const [ativa, setAtiva] = useState<number | undefined>(undefined);
   return (
     <div className="rounded-[16px] border border-border bg-surface p-4">
       {titulo ? <p className="mb-2 text-sm font-medium">{titulo}</p> : null}
@@ -198,16 +245,17 @@ export function GraficoDonut({
                 innerRadius="58%"
                 outerRadius="88%"
                 paddingAngle={2}
-                stroke={CORES.fundo}
+                stroke="transparent"
+                activeIndex={ativa}
+                activeShape={fatiaAmpliada}
+                onMouseEnter={(_, i) => setAtiva(i)}
+                onMouseLeave={() => setAtiva(undefined)}
               >
                 {serie.map((d) => (
                   <Cell key={d.classe} fill={d.cor} />
                 ))}
               </Pie>
-              <Tooltip
-                contentStyle={tooltip}
-                formatter={(v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-              />
+              <Tooltip content={<TooltipBranco />} />
             </PieChart>
           </ResponsiveContainer>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
@@ -239,21 +287,21 @@ export function CardsClasse({
   const visiveis = dados.filter((d) => d.valor > 0);
   const total = visiveis.reduce((s, d) => s + d.valor, 0);
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {visiveis.map((d, i) => {
         const v = d.variacaoPct;
         const positivo = (v ?? 0) > 0.0000001;
         const negativo = (v ?? 0) < -0.0000001;
         return (
-          <div key={d.classe} className="rounded-[16px] p-4 text-white" style={{ background: corClasse(i) }}>
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] opacity-90">{d.classe}</p>
-              <p className="font-mono text-sm">
+          <div key={d.classe} className="min-w-0 overflow-hidden rounded-[16px] p-4 text-white" style={{ background: corClasse(i) }}>
+            <div className="flex items-start justify-between gap-3">
+              <p className="min-w-0 text-[11px] font-semibold uppercase leading-snug tracking-[0.06em] opacity-90">{d.classe}</p>
+              <p className="shrink-0 font-mono text-xs">
                 {v == null ? "—" : `${positivo ? "↑" : negativo ? "↓" : ""} ${formatPct(v, 2)}`}
               </p>
             </div>
-            <p className="mt-2 font-mono text-lg leading-tight">{formatBRL(d.valor)}</p>
-            <p className="mt-1 text-sm opacity-90">{formatPct(total ? d.valor / total : 0)} da carteira</p>
+            <p className="mt-2 font-mono text-sm leading-snug sm:text-base">{formatBRL(d.valor)}</p>
+            <p className="mt-1 text-xs opacity-90">{formatPct(total ? d.valor / total : 0)} da carteira</p>
             {d.variacaoReais != null ? (
               <p className="mt-1 font-mono text-xs opacity-90">Hoje: {formatBRL(d.variacaoReais)}</p>
             ) : null}
@@ -292,16 +340,29 @@ export function GraficoProventosComparativo({
     { nome: "Mês atual", valor: atual, cor: "#22c55e" },
   ];
   const pct = anterior > 0 ? atual / anterior : null;
+  const [ativa, setAtiva] = useState<number | undefined>(undefined);
   return (
     <div className="relative h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Pie data={serie} dataKey="valor" nameKey="nome" innerRadius="62%" outerRadius="88%" stroke={CORES.fundo} paddingAngle={3}>
+          <Pie
+            data={serie}
+            dataKey="valor"
+            nameKey="nome"
+            innerRadius="62%"
+            outerRadius="88%"
+            stroke="transparent"
+            paddingAngle={3}
+            activeIndex={ativa}
+            activeShape={fatiaAmpliada}
+            onMouseEnter={(_, i) => setAtiva(i)}
+            onMouseLeave={() => setAtiva(undefined)}
+          >
             {serie.map((d) => (
               <Cell key={d.nome} fill={d.cor} />
             ))}
           </Pie>
-          <Tooltip contentStyle={tooltip} formatter={(v: number) => formatBRL(v)} />
+          <Tooltip content={<TooltipBranco />} />
         </PieChart>
       </ResponsiveContainer>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
@@ -316,10 +377,18 @@ export function GraficoProventosComparativo({
 }
 
 export function GraficoCaixa({ dados }: { dados: { rotulo: string; saldo: number }[] }) {
+  const media = dados.length ? dados.reduce((s, d) => s + d.saldo, 0) / dados.length : 0;
+  const serie = dados.map((d) => ({ ...d, media }));
   return (
-    <div className="h-64 w-full">
+    <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={dados} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <AreaChart data={serie} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="caixaSaldo" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={CORES.accent} stopOpacity={0.45} />
+              <stop offset="100%" stopColor={CORES.accent} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis
@@ -327,11 +396,78 @@ export function GraficoCaixa({ dados }: { dados: { rotulo: string; saldo: number
             tick={{ fill: CORES.textoSecundario, fontSize: 11 }}
             tickFormatter={eixoReais}
           />
-          <Tooltip
-            contentStyle={tooltip}
-            formatter={(v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-          />
-          <Line type="monotone" dataKey="saldo" name="Saldo em espécie" stroke={CORES.accent} strokeWidth={2} dot={false} />
+          <Tooltip content={<TooltipBranco />} />
+          <Legend />
+          <Area type="monotone" dataKey="saldo" name="Saldo em espécie" stroke={CORES.accent} fill="url(#caixaSaldo)" strokeWidth={2} />
+          <Line type="monotone" dataKey="media" name="Média mensal" stroke={CORES.alerta} strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function GraficoSerieMedia({
+  dados,
+  nome,
+  cor = CORES.accent,
+}: {
+  dados: { rotulo: string; valor: number }[];
+  nome: string;
+  cor?: string;
+}) {
+  const media = dados.length ? dados.reduce((s, d) => s + d.valor, 0) / dados.length : 0;
+  const serie = dados.map((d) => ({ ...d, media }));
+  return (
+    <div className="h-64 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={serie} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
+          <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
+          <YAxis stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} tickFormatter={eixoReais} />
+          <Tooltip content={<TooltipBranco />} />
+          <Legend />
+          <Line type="monotone" dataKey="valor" name={nome} stroke={cor} strokeWidth={2} dot={{ r: 3 }} />
+          <Line type="monotone" dataKey="media" name="Média mensal" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function GraficoCategoriasMes({
+  categorias,
+  meses,
+}: {
+  categorias: { categoria: string; meses: number[] }[];
+  meses: string[];
+}) {
+  const serie = meses.map((rotulo, i) => {
+    const row: Record<string, string | number> = { rotulo };
+    let soma = 0;
+    for (const c of categorias) {
+      const v = c.meses[i] ?? 0;
+      row[c.categoria] = v;
+      soma += v;
+    }
+    return row;
+  });
+  const media = serie.length
+    ? serie.reduce((s, r) => s + categorias.reduce((a, c) => a + Number(r[c.categoria] ?? 0), 0), 0) / serie.length
+    : 0;
+  const comMedia = serie.map((r) => ({ ...r, media }));
+  return (
+    <div className="h-72 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={comMedia} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
+          <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
+          <YAxis stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} tickFormatter={eixoReais} />
+          <Tooltip content={<TooltipBranco />} />
+          <Legend />
+          {categorias.map((c, i) => (
+            <Line key={c.categoria} type="monotone" dataKey={c.categoria} stroke={corClasse(i)} strokeWidth={2} dot={false} />
+          ))}
+          <Line type="monotone" dataKey="media" name="Média mensal" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>

@@ -10,6 +10,7 @@
  */
 
 import { consultar, getDb, type LinhaSql } from "@/lib/financeiro/db";
+import { ehImovel, ehSaidaImovel, TIPOS_CUSTO_IMOVEL } from "@/lib/financeiro/imovel";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 export const TIPO_CONSULTORIO = "Distribuição de Lucros - Consultório Médico";
@@ -108,6 +109,15 @@ export type LinhaDarf = {
   status: "Não Aplicável" | "Pago" | "Pendente";
 };
 
+export type OrigemCalculo = {
+  mes: number;
+  data: string;
+  origem: string;
+  ativo: string;
+  detalhe: string;
+  valor: number;
+};
+
 export type ResumoIrpf = {
   ano: number;
   mesAtual: number;
@@ -138,6 +148,7 @@ export type ResumoIrpf = {
   darfPendente: number;
   motor: LinhaMotor[];
   darf: LinhaDarf[];
+  origens: OrigemCalculo[];
 };
 
 function ultimoDiaProximoMes(ano: number, mes: number): string {
@@ -180,11 +191,11 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
 
   const rendimentos = consultar(
     db,
-    `SELECT data, tipo, valor_computavel_irpfm, ir_retido, valor_bruto_brl FROM rendimentos`,
+    `SELECT data, tipo, ticker, descricao, origem, valor_computavel_irpfm, ir_retido, valor_bruto_brl FROM rendimentos`,
   );
   const transacoes = consultar(
     db,
-    `SELECT data, tipo_operacao, categoria, origem, classif_irpfm, ganho_capital_brl, valor_brl
+    `SELECT data, tipo_operacao, categoria, origem, ticker, classif_irpfm, ganho_capital_brl, valor_brl
      FROM transacoes`,
   );
   const pagosDarf = consultar(db, `SELECT ano, mes, imposto, pago FROM darf_gc`);
@@ -202,6 +213,7 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
   const demais = Array(13).fill(0);
   const irRetido = Array(13).fill(0);
   let rendimentosTotais = 0;
+  const origens: OrigemCalculo[] = [];
 
   for (const r of rendimentos) {
     const dt = parseIso(campo(r, "data"));
@@ -211,7 +223,56 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
     rendimentosTotais += bruto;
     if (str(campo(r, "tipo")) === TIPO_CONSULTORIO) dist[dt.mes] += t;
     else demais[dt.mes] += t;
+    if (Math.abs(t) > 0.004) {
+      origens.push({
+        mes: dt.mes,
+        data: str(campo(r, "data")).slice(0, 10),
+        origem: str(campo(r, "tipo")) === TIPO_CONSULTORIO ? "Distribuição" : "Rendimento",
+        ativo: str(campo(r, "ticker")) || "—",
+        detalhe: [str(campo(r, "origem")) || "Nacional", str(campo(r, "tipo")) || str(campo(r, "descricao")) || "Rendimento"]
+          .filter(Boolean)
+          .join(" · "),
+        valor: t,
+      });
+    }
     irRetido[dt.mes] += num(campo(r, "ir_retido"));
+  }
+
+  const jaLiquidado = new Set(
+    rendimentos
+      .filter((r) => /liquida/i.test(str(campo(r, "descricao"))))
+      .map((r) => `${str(campo(r, "data")).slice(0, 10)}|${str(campo(r, "ticker")).toUpperCase()}`),
+  );
+  for (const r of consultar(
+    db,
+    `SELECT data_resgate, valor_liq_recebido, valor_resgatado, valor_aplicado, ir_pago, isencao_ir,
+            COALESCE(NULLIF(TRIM(ticker), ''), NULLIF(TRIM(nome), ''), '') AS ticker
+     FROM renda_fixa
+     WHERE status = 'Resgatado' AND data_resgate IS NOT NULL AND TRIM(data_resgate) <> ''`,
+  )) {
+    const dt = parseIso(campo(r, "data_resgate"));
+    if (!dt || dt.ano !== ano) continue;
+    const dia = str(campo(r, "data_resgate")).slice(0, 10);
+    const ticker = str(campo(r, "ticker")).toUpperCase();
+    if (jaLiquidado.has(`${dia}|${ticker}`)) continue;
+    if (num(campo(r, "isencao_ir")) === 1) continue;
+    const liq = num(campo(r, "valor_liq_recebido")) || num(campo(r, "valor_resgatado"));
+    const apl = num(campo(r, "valor_aplicado"));
+    const ir = num(campo(r, "ir_pago"));
+    const lucro = Math.max(0, liq - apl);
+    const bruto = lucro + Math.max(0, ir);
+    if (bruto <= 0.004) continue;
+    demais[dt.mes] += bruto;
+    irRetido[dt.mes] += Math.max(0, ir);
+    origens.push({
+      mes: dt.mes,
+      data: dia,
+      origem: "Renda fixa",
+      ativo: ticker || "—",
+      detalhe: "Lucro na liquidação",
+      valor: bruto,
+    });
+    jaLiquidado.add(`${dia}|${ticker}`);
   }
 
   const gcObrig = Array(13).fill(0);
@@ -235,18 +296,43 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
     const valor = num(campo(r, "valor_brl"));
 
     // A aba IMPOSTO DE RENDA soma o livro inteiro nestes três cards (sem filtro de ano).
-    if (tipo === "Compra" || tipo === "Parcela Imóvel" || tipo === "ITBI / Cartório") {
+    const custoImovel = (TIPOS_CUSTO_IMOVEL as readonly string[]).includes(tipo);
+    if (tipo === "Compra" || custoImovel) {
       aportesAno += valor;
     }
-    if (tipo === "Venda") {
+    if (tipo === "Venda" || (ehImovel(categoria) && ehSaidaImovel(tipo))) {
       resgatesAno += valor;
       gcNacionalAno += origem === "Internacional" ? 0 : gc;
       gcInternacionalAno += origem === "Internacional" ? gc : 0;
     }
 
     if (dt.ano !== ano) continue;
+    if (ehImovel(categoria) && (ehSaidaImovel(tipo) || tipo === "Venda")) {
+      origens.push({
+        mes: dt.mes,
+        data: str(campo(r, "data")).slice(0, 10),
+        origem: "Imóvel",
+        ativo: str(campo(r, "ticker")) || "—",
+        detalhe: "Fora da base mensal do IRPFM",
+        valor: 0,
+      });
+      continue;
+    }
     if (tipo === "Venda") {
-      if (classif === "Obrigatório") gcObrig[dt.mes] += gc;
+      const entra = classif === "Obrigatório";
+      if (entra) {
+        gcObrig[dt.mes] += gc;
+      }
+      if (Math.abs(gc) > 0.004 || !entra) {
+        origens.push({
+          mes: dt.mes,
+          data: str(campo(r, "data")).slice(0, 10),
+          origem: origem === "Internacional" ? "Venda internacional" : "Venda",
+          ativo: str(campo(r, "ticker")) || categoria || "—",
+          detalhe: entra ? `${origem || "Nacional"} · ${categoria || "ganho"}` : `Não entra no IRPFM · ${classif || "sem classificação"}`,
+          valor: entra ? gc : 0,
+        });
+      }
       if (origem === "Nacional") {
         vendasNac[dt.mes] += valor;
         if (classif === "Obrigatório" && categoria !== "Fundos Imobiliários") {
@@ -360,5 +446,6 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
     darfPendente,
     motor,
     darf,
+    origens: origens.sort((a, b) => a.mes - b.mes || a.data.localeCompare(b.data)),
   };
 }

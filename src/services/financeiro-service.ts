@@ -85,6 +85,7 @@ export type ResumoFinanceiro = {
   projecao: LinhaProjecao[];
   comparativo: LinhaComparativo[];
   despesas: Despesa[];
+  rendimentosPorCategoria: { categoria: string; meses: number[] }[];
 };
 
 export async function resumoAnual(anoForcado?: number): Promise<ResumoFinanceiro> {
@@ -96,11 +97,23 @@ export async function resumoAnual(anoForcado?: number): Promise<ResumoFinanceiro
   const hoje = new Date().toISOString().slice(0, 10);
 
   const brutoMes = Array(13).fill(0);
-  for (const r of consultar(db, `SELECT data, valor_bruto_brl FROM rendimentos`)) {
+  const porCat = new Map<string, number[]>();
+  for (const r of consultar(db, `SELECT data, valor_bruto_brl, categoria FROM rendimentos`)) {
     const dt = parseIso(campo(r, "data"));
     if (dt?.ano !== ano) continue;
-    brutoMes[dt.mes] += num(campo(r, "valor_bruto_brl"));
+    const valor = num(campo(r, "valor_bruto_brl"));
+    brutoMes[dt.mes] += valor;
+    const cat = str(campo(r, "categoria")) || "Sem categoria";
+    const arr = porCat.get(cat) ?? Array(13).fill(0);
+    arr[dt.mes] += valor;
+    porCat.set(cat, arr);
   }
+  const rendimentosPorCategoria = [...porCat.entries()]
+    .map(([categoria, meses]) => ({ categoria, meses: meses.slice(1), total: meses.reduce((a, b) => a + b, 0) }))
+    .filter((c) => c.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8)
+    .map(({ categoria, meses }) => ({ categoria, meses }));
 
   const despesas: Despesa[] = [];
   const pagasMes = Array(13).fill(0);
@@ -109,7 +122,7 @@ export async function resumoAnual(anoForcado?: number): Promise<ResumoFinanceiro
 
   for (const r of consultar(
     db,
-    `SELECT data_vencimento, categoria, descricao, instituicao, valor, data_pagamento FROM despesas`,
+    `SELECT data_vencimento, categoria, descricao, instituicao, valor, data_pagamento FROM despesas WHERE deleted_at IS NULL OR TRIM(deleted_at) = ''`,
   )) {
     const venc = parseIso(campo(r, "data_vencimento"));
     if (!venc) continue;
@@ -192,5 +205,6 @@ export async function resumoAnual(anoForcado?: number): Promise<ResumoFinanceiro
     projecao,
     comparativo,
     despesas,
+    rendimentosPorCategoria,
   };
 }

@@ -295,6 +295,83 @@ export function aplicarSchemaCadastros(db: Database): void {
     sel.free();
     insEav.free();
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cadastros_ocultos (
+      sessao TEXT NOT NULL,
+      nome TEXT NOT NULL,
+      PRIMARY KEY (sessao, nome)
+    );
+  `);
+  sanearCadastros(db);
+  garantirAtivoTipoRendimento(db);
+}
+
+function chaveCadastro(nome: string): string {
+  return nome
+    .trim()
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Tira de cada lista o item que pertence a outra sessão e recolocá a semente certa. */
+export function sanearCadastros(db: Database): void {
+  const dono = new Map<string, Set<string>>();
+  for (const [sessao, nomes] of Object.entries(SEMENTES_CADASTRO)) {
+    for (const nome of nomes) {
+      const chave = chaveCadastro(nome);
+      const set = dono.get(chave) ?? new Set<string>();
+      set.add(sessao);
+      dono.set(chave, set);
+    }
+  }
+  for (const s of SESSOES_CADASTRO) {
+    if (s.especial) continue;
+    const ler = db.prepare(`SELECT id, nome FROM ${s.tabela}`);
+    const apagar: number[] = [];
+    while (ler.step()) {
+      const r = ler.getAsObject();
+      const donos = dono.get(chaveCadastro(String(r.nome ?? "")));
+      if (donos && !donos.has(s.id)) apagar.push(Number(r.id));
+    }
+    ler.free();
+    const del = db.prepare(`DELETE FROM ${s.tabela} WHERE id = ?`);
+    for (const id of apagar) del.run([id]);
+    del.free();
+    const ocultos = new Set<string>();
+    const lerOcultos = db.prepare(`SELECT nome FROM cadastros_ocultos WHERE sessao = ?`);
+    lerOcultos.bind([s.id]);
+    while (lerOcultos.step()) ocultos.add(chaveCadastro(String(lerOcultos.getAsObject().nome ?? "")));
+    lerOcultos.free();
+    const limpar = db.prepare(`SELECT id, nome FROM ${s.tabela}`);
+    const idsOcultos: number[] = [];
+    while (limpar.step()) {
+      const r = limpar.getAsObject();
+      if (ocultos.has(chaveCadastro(String(r.nome ?? "")))) idsOcultos.push(Number(r.id));
+    }
+    limpar.free();
+    const delOculto = db.prepare(`DELETE FROM ${s.tabela} WHERE id = ?`);
+    for (const id of idsOcultos) delOculto.run([id]);
+    delOculto.free();
+    const ins = db.prepare(`INSERT OR IGNORE INTO ${s.tabela} (nome, ordem, ativo) VALUES (?, ?, 1)`);
+    (SEMENTES_CADASTRO[s.id] ?? []).forEach((nome, i) => {
+      if (ocultos.has(chaveCadastro(nome))) return;
+      ins.run([nome, i + 1]);
+    });
+    ins.free();
+    db.run(`DELETE FROM cadastros WHERE grupo = ?`, [s.id]);
+    const voltar = db.prepare(`INSERT OR IGNORE INTO cadastros (grupo, valor, ordem) VALUES (?, ?, ?)`);
+    const sel = db.prepare(`SELECT nome, ordem FROM ${s.tabela} WHERE ativo = 1 ORDER BY ordem, nome`);
+    while (sel.step()) {
+      const r = sel.getAsObject();
+      voltar.run([s.id, String(r.nome), Number(r.ordem ?? 0)]);
+    }
+    sel.free();
+    voltar.free();
+  }
+}
+
+function garantirAtivoTipoRendimento(db: Database): void {
   const cols: string[] = [];
   const pragma = db.prepare(`PRAGMA table_info(tipos_rendimento)`);
   while (pragma.step()) cols.push(String(pragma.getAsObject().name));

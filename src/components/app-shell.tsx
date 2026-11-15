@@ -3,14 +3,16 @@ import {
   Banknote,
   CandlestickChart,
   ChevronDown,
+  Home,
   Landmark,
   LayoutDashboard,
   Menu,
-  PenLine,
   Percent,
   PieChart,
   Settings,
+  Target,
   Wallet,
+  Wrench,
   X,
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -22,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { PeriodoProvider } from "@/hooks/periodo-context";
 import { MercadoProvider } from "@/hooks/mercado-context";
 import { APP_VERSAO } from "@/lib/app-version";
+import { SESSOES_CADASTRO } from "@/lib/financeiro/cadastros-def";
 import { cn } from "@/lib/utils";
 import {
   iniciarAtualizacaoAutomatica,
@@ -30,16 +33,13 @@ import {
 } from "@/services/atualizacao-automatica-service";
 import { sincronizarAoAbrir } from "@/services/sync-service";
 import { iniciarChecagemUpdate } from "@/services/update-service";
-import { atualizarPosicoes } from "@/services/cotacao-ativos-service";
-import { atualizarRendaFixa } from "@/services/renda-fixa-service";
-import { atualizarTaxas } from "@/services/taxas-service";
 
 type Filho = {
   label: string;
   to?: string;
   search?: Record<string, string>;
-  acao?: "posicoes" | "rf" | "taxas";
   hash?: string;
+  titulo?: boolean;
 };
 
 const NAV: {
@@ -51,15 +51,26 @@ const NAV: {
 }[] = [
   { label: "Dashboard", hint: "Visão geral", icon: LayoutDashboard, to: "/", filhos: [] },
   {
+    label: "Patrimônio",
+    hint: "Composição e liquidez",
+    icon: PieChart,
+    to: "/patrimonio",
+    filhos: [{ label: "Visão geral", to: "/patrimonio" }],
+  },
+  {
     label: "Investimentos",
     hint: "Carteira e análises",
     icon: CandlestickChart,
     to: "/investimentos",
     filhos: [
       { label: "Carteira ativa", to: "/investimentos", search: { aba: "ativa" } },
-      { label: "Histórico / Inativa", to: "/investimentos", search: { aba: "inativa" } },
+      { label: "Carteira inativa", to: "/investimentos", search: { aba: "inativa" } },
+      { label: "Histórico e Análise de Ativos", to: "/investimentos", search: { aba: "historico" } },
       { label: "Proventos recebidos", to: "/proventos" },
-      { label: "Atualizar posições", acao: "posicoes" },
+      { label: "Transações", to: "/transacoes", search: { livro: "bolsa" } },
+      { label: "Nota de corretagem", to: "/lancamentos", search: { tipo: "nota" } },
+      { label: "Extrato da corretora", to: "/lancamentos", search: { tipo: "extrato_corretora" } },
+      { label: "Câmbio", to: "/cambio" },
     ],
   },
   {
@@ -69,15 +80,21 @@ const NAV: {
     to: "/renda-fixa",
     filhos: [
       { label: "Títulos", to: "/renda-fixa" },
-      { label: "Atualizar renda fixa", acao: "rf" },
+      { label: "Renda fixa internacional", to: "/lancamentos", search: { tipo: "rf_int" } },
     ],
   },
   {
-    label: "Patrimônio",
-    hint: "Composição e liquidez",
-    icon: PieChart,
-    to: "/patrimonio",
-    filhos: [{ label: "Visão geral", to: "/patrimonio" }],
+    label: "Imóveis",
+    hint: "Custo e lançamentos",
+    icon: Home,
+    to: "/imoveis",
+    filhos: [
+      { label: "Painel", to: "/imoveis", search: { aba: "painel" } },
+      { label: "Transações", to: "/transacoes", search: { livro: "imoveis" } },
+      { label: "Aquisição / venda", to: "/imoveis", search: { aba: "aquisicao" } },
+      { label: "Imposto e corretagem", to: "/imoveis", search: { aba: "custo" } },
+      { label: "Custos de manutenção", to: "/imoveis", search: { aba: "manutencao" } },
+    ],
   },
   {
     label: "IRPF / IRPFM",
@@ -85,9 +102,9 @@ const NAV: {
     icon: Landmark,
     to: "/irpf",
     filhos: [
-      { label: "Motor mensal", to: "/irpf" },
-      { label: "Controle fiscal", to: "/irpf", hash: "fiscal" },
-      { label: "Relatório ano-base", to: "/irpf", hash: "relatorio" },
+      { label: "Motor mensal", to: "/irpf", search: { tela: "motor" } },
+      { label: "Controle fiscal", to: "/irpf", search: { tela: "fiscal" } },
+      { label: "Relatório ano-base", to: "/irpf", search: { tela: "relatorio" } },
     ],
   },
   {
@@ -97,7 +114,8 @@ const NAV: {
     to: "/caixa",
     filhos: [
       { label: "Extrato", to: "/caixa" },
-      { label: "Conferência", to: "/caixa", hash: "conferencia" },
+      { label: "Lançar depósito ou saque", to: "/lancamentos", search: { tipo: "caixa" } },
+      { label: "Conferência", to: "/lancamentos", search: { tipo: "conferencia" } },
     ],
   },
   {
@@ -105,67 +123,67 @@ const NAV: {
     hint: "Fluxo e despesas",
     icon: Wallet,
     to: "/financeiro",
-    filhos: [{ label: "Resumo", to: "/financeiro" }],
-  },
-  {
-    label: "Lançamentos",
-    hint: "Entrada de dados",
-    icon: PenLine,
-    to: "/lancamentos",
     filhos: [
-      { label: "Nota de corretagem", to: "/lancamentos", search: { tipo: "nota" } },
+      { label: "Resumo", to: "/financeiro" },
       { label: "Extrato bancário", to: "/lancamentos", search: { tipo: "extrato" } },
-      { label: "Imóvel", to: "/lancamentos", search: { tipo: "imovel" } },
-      { label: "Transação avulsa", to: "/lancamentos", search: { tipo: "tx" } },
+      { label: "Extrato internacional", to: "/lancamentos", search: { tipo: "extrato_int" } },
       { label: "Conta a pagar", to: "/lancamentos", search: { tipo: "desp" } },
       { label: "Conta a receber", to: "/lancamentos", search: { tipo: "rend" } },
-      { label: "Caixa físico", to: "/lancamentos", search: { tipo: "caixa" } },
-      { label: "Conferência", to: "/lancamentos", search: { tipo: "conferencia" } },
-      { label: "Nota internacional", to: "/lancamentos", search: { tipo: "nota_int" } },
-      { label: "Extrato internacional", to: "/lancamentos", search: { tipo: "extrato_int" } },
-      { label: "RF internacional", to: "/lancamentos", search: { tipo: "rf_int" } },
-      { label: "Avulsa internacional", to: "/lancamentos", search: { tipo: "tx_int" } },
     ],
+  },
+  {
+    label: "Metas",
+    hint: "Cruzamento de dados",
+    icon: Target,
+    to: "/metas",
+    filhos: [],
+  },
+  {
+    label: "Manutenção",
+    hint: "Instalador e arquivos",
+    icon: Wrench,
+    to: "/manutencao",
+    filhos: [],
   },
   {
     label: "Configurações",
     hint: "Base de dados",
     icon: Settings,
     to: "/configuracoes",
-    filhos: [{ label: "Base de Dados", to: "/configuracoes" }],
+    filhos: ["Rendimentos", "Despesas", "Gerais", "Investimentos"].flatMap((secao) => [
+      { label: secao, titulo: true },
+      ...SESSOES_CADASTRO.filter((s) => s.secao === secao).map((s) => ({
+        label: s.rotulo,
+        to: "/configuracoes",
+        search: { sessao: s.id },
+      })),
+    ]),
   },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const search = useRouterState({ select: (s) => s.location.searchStr });
+  const hashAtual = useRouterState({ select: (s) => s.location.hash.replace(/^#/, "") });
   const [abertos, setAbertos] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
     for (const g of NAV) if (g.to && pathname.startsWith(g.to) && g.to !== "/") o[g.label] = true;
+    if (pathname.startsWith("/imoveis")) o["Imóveis"] = true;
+    if (pathname.startsWith("/cambio")) o["Investimentos"] = true;
+    if (pathname === "/transacoes") {
+      const livro = new URLSearchParams(search.replace(/^\?/, "")).get("livro") ?? "";
+      o[livro === "imoveis" ? "Imóveis" : "Investimentos"] = true;
+    }
     if (pathname === "/lancamentos") {
-      o["Lançamentos"] = true;
+      const tipo = new URLSearchParams(search.replace(/^\?/, "")).get("tipo") ?? "";
+      if (tipo === "caixa" || tipo === "conferencia") o["Caixa físico"] = true;
+      else if (tipo === "desp" || tipo === "rend" || tipo === "extrato" || tipo === "extrato_int") o["Financeiro"] = true;
+      else if (tipo === "extrato_corretora" || tipo === "nota" || tipo === "tx" || tipo === "nota_int" || tipo === "tx_int") o["Investimentos"] = true;
+      else if (tipo === "rf_int") o["Renda fixa"] = true;
+      else o["Investimentos"] = true;
     }
     return o;
   });
-  const [acaoMsg, setAcaoMsg] = useState<string | null>(null);
-
-  async function runAcao(acao: Filho["acao"]) {
-    setAcaoMsg("Atualizando…");
-    try {
-      if (acao === "posicoes") {
-        const r = await atualizarPosicoes();
-        setAcaoMsg(`${r.ok} cotações (${r.fonte})`);
-      } else if (acao === "rf") {
-        const r = await atualizarRendaFixa();
-        setAcaoMsg(`${r.atualizados} títulos · ${r.fonte}`);
-      } else if (acao === "taxas") {
-        await atualizarTaxas();
-        setAcaoMsg("Taxas SGS atualizadas");
-      }
-    } catch (e) {
-      setAcaoMsg(e instanceof Error ? e.message : "Falha");
-    }
-  }
 
   return (
     <nav className="flex flex-col gap-1" aria-label="Módulos">
@@ -208,22 +226,20 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             {aberto && item.filhos.length ? (
               <div className="mb-1 ml-6 mt-0.5 flex flex-col gap-0.5 border-l border-border pl-2">
                 {item.filhos.map((f) => {
-                  if (f.acao) {
+                  if (f.titulo) {
                     return (
-                      <button
-                        key={f.label}
-                        type="button"
-                        className="rounded-md px-2 py-1.5 text-left text-xs text-muted hover:bg-surface-2 hover:text-fg"
-                        onClick={() => void runAcao(f.acao)}
-                      >
+                      <p key={f.label} className="px-2 pb-0.5 pt-2 text-[10px] font-medium uppercase tracking-[0.14em] text-subtle">
                         {f.label}
-                      </button>
+                      </p>
                     );
                   }
+                  const params = new URLSearchParams(search.replace(/^\?/, ""));
                   const href = `${f.to ?? ""}${f.search ? `?${new URLSearchParams(f.search).toString()}` : ""}${f.hash ? `#${f.hash}` : ""}`;
                   const ativo =
                     pathname === f.to &&
-                    (!f.search || search.includes(`${Object.keys(f.search)[0]}=${Object.values(f.search)[0]}`));
+                    (f.hash
+                      ? hashAtual === f.hash
+                      : !f.search || Object.entries(f.search).every(([k, v]) => params.get(k) === v));
                   return (
                     <Link
                       key={href + f.label}
@@ -245,7 +261,6 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           </div>
         );
       })}
-      {acaoMsg ? <p className="px-3 pt-2 text-[11px] text-subtle">{acaoMsg}</p> : null}
     </nav>
   );
 }

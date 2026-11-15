@@ -296,16 +296,32 @@ function cab(rec: Record<string, unknown>, ...nomes: string[]): unknown {
 }
 
 function isoData(v: unknown): string | null {
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
-  if (typeof v === "number") {
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const y = v.getUTCFullYear();
+    const m = String(v.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(v.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+  if (typeof v === "number" && Number.isFinite(v)) {
     const epoch = new Date(Date.UTC(1899, 11, 30));
     epoch.setUTCDate(epoch.getUTCDate() + Math.floor(v));
-    return epoch.toISOString().slice(0, 10);
+    const y = epoch.getUTCFullYear();
+    const m = String(epoch.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(epoch.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
   }
   if (typeof v === "string" && v.trim()) {
-    const d = new Date(v);
-    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-    return v.slice(0, 10);
+    const s = v.trim();
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const br = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4,6})/);
+    if (br) {
+      const ano = br[3].slice(0, 4);
+      const mes = br[2].padStart(2, "0");
+      const dia = br[1].padStart(2, "0");
+      return `${ano}-${mes}-${dia}`;
+    }
+    return null;
   }
   return null;
 }

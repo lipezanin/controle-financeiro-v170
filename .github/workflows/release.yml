@@ -1,5 +1,5 @@
 # Publica o instalador Windows quando uma tag v* é enviada.
-# Ex.: git tag v2.0.1 && git push origin v2.0.1
+# Ex.: git tag v2.0.008 && git push origin v2.0.008
 # Anexa ControleFinanceiro-Setup.exe e latest.json na Release.
 name: release
 
@@ -59,5 +59,6 @@ jobs:
           name: Controle Financeiro ${{ github.ref_name }}
           files: |
             artifacts/ControleFinanceiro-Setup.exe
+            artifacts/ControleFinanceiro-delta-*.zip
             artifacts/latest.json
           generate_release_notes: true

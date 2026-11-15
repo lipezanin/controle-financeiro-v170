@@ -3,10 +3,24 @@
  * Saldo = Σ depósitos − Σ saques. Resumo mensal ignora datas inválidas, como o SUMIFS do Excel.
  */
 
-import { consultar, executar, getDb, salvarDb, type LinhaSql } from "@/lib/financeiro/db";
+import { consultar, executar, getDb, salvarDb, apagarComTombstone, type LinhaSql } from "@/lib/financeiro/db";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+export function tipoCaixa(tipo: unknown): "Depósito" | "Saque" {
+  const t = String(tipo ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+  if (t === "saque" || t === "retirada" || t === "saida") return "Saque";
+  return "Depósito";
+}
+
+export function sinalCaixa(tipo: unknown): number {
+  return tipoCaixa(tipo) === "Saque" ? -1 : 1;
+}
 
 function num(v: unknown): number {
   return typeof v === "number" ? v : Number(v) || 0;
@@ -73,7 +87,9 @@ export async function resumirCaixa(anoForcado?: number): Promise<ResumoCaixa> {
 
   const linhas = consultar(
     db,
-    `SELECT id, data, tipo, valor, descricao, observacao FROM caixa_fisico ORDER BY id ASC`,
+    `SELECT id, data, tipo, valor, descricao, observacao FROM caixa_fisico
+     WHERE deleted_at IS NULL OR TRIM(CAST(deleted_at AS TEXT)) = ''
+     ORDER BY data ASC, id ASC`,
   );
 
   const movimentos: MovimentoCaixa[] = [];
@@ -86,7 +102,7 @@ export async function resumirCaixa(anoForcado?: number): Promise<ResumoCaixa> {
   const saidas = Array(13).fill(0);
 
   for (const r of linhas) {
-    const tipo = str(campo(r, "tipo")) === "Saque" ? "Saque" : "Depósito";
+    const tipo = tipoCaixa(campo(r, "tipo"));
     const valor = Math.abs(num(campo(r, "valor")));
     saldo += tipo === "Depósito" ? valor : -valor;
     if (tipo === "Depósito") depositosTotal += valor;
@@ -155,6 +171,16 @@ export async function lancarMovimento(input: {
   if (!parseIso(input.data) || !valor) {
     throw new Error("Informe data (AAAA-MM-DD) e um valor maior que zero.");
   }
+  const igual = consultar(
+    db,
+    `SELECT id FROM caixa_fisico
+     WHERE substr(COALESCE(data,''),1,10) = substr(?,1,10)
+       AND tipo = ? AND ABS(ROUND(COALESCE(valor,0),2) - ROUND(?,2)) < 0.02
+       AND COALESCE(descricao,'') = ?
+     LIMIT 1`,
+    [input.data, input.tipo, valor, input.descricao?.trim() || ""],
+  );
+  if (igual.length) throw new Error("Já existe este movimento no caixa, com a mesma data, tipo e valor.");
   executar(db, `INSERT INTO caixa_fisico (data, tipo, valor, descricao) VALUES (?, ?, ?, ?)`, [
     input.data,
     input.tipo,
@@ -182,7 +208,7 @@ export async function atualizarMovimento(
 export async function excluirMovimentos(ids: number[]): Promise<void> {
   if (!ids.length) return;
   const db = await getDb();
-  executar(db, `DELETE FROM caixa_fisico WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+  apagarComTombstone(db, "caixa_fisico", ids);
   await salvarDb();
 }
 

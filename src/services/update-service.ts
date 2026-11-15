@@ -7,19 +7,23 @@
 import { APP_VERSAO } from "@/lib/app-version";
 
 export type StatusUpdate = {
-  estado: "idle" | "checando" | "atualizado" | "disponivel" | "baixando" | "indisponivel";
+  estado: "idle" | "checando" | "atualizado" | "disponivel" | "baixando" | "pronto" | "indisponivel";
   local: string;
   remota: string | null;
   notas: string | null;
   url: string | null;
+  deltaUrl: string | null;
   detalhe: string;
 };
 
-type LatestJson = { version?: string; url?: string; notes?: string | null };
+type DeltaInfo = { from?: string; url?: string; bytes?: number | null };
+type LatestJson = { version?: string; url?: string; notes?: string | null; delta?: DeltaInfo | null };
 
 type Desktop = {
   ativo?: boolean;
   aplicarAtualizacao?: (url: string) => Promise<unknown>;
+  baixarDelta?: (url: string) => Promise<unknown>;
+  aplicarDelta?: () => Promise<unknown>;
 };
 
 function versaoDesteApp(): string {
@@ -36,6 +40,7 @@ let status: StatusUpdate = {
   remota: null,
   notas: null,
   url: null,
+  deltaUrl: null,
   detalhe: `v${APP_VERSAO}`,
 };
 const ouvintes = new Set<(s: StatusUpdate) => void>();
@@ -62,6 +67,7 @@ function partes(v: string): number[] {
     .map((p) => Number.parseInt(p, 10) || 0);
 }
 
+/** Comparação numérica. 2.0.008 é maior que 2.0.7 e igual a 2.0.8. */
 export function versaoMaior(a: string, b: string): boolean {
   const pa = partes(a);
   const pb = partes(b);
@@ -122,14 +128,42 @@ export async function checarUpdate(): Promise<StatusUpdate> {
       });
       return status;
     }
+    const deltaCompativel = Boolean(ultima.delta?.url) && (!ultima.delta?.from || ultima.delta.from === local);
     emitir({
-      estado: "disponivel",
+      estado: deltaCompativel ? "baixando" : "disponivel",
       local,
       remota: ultima.version,
       notas: ultima.notes ?? null,
       url: ultima.url,
-      detalhe: `Nova versão ${ultima.version}`,
+      deltaUrl: deltaCompativel ? (ultima.delta?.url ?? null) : null,
+      detalhe: deltaCompativel
+        ? `Baixando só o que mudou para ${ultima.version}…`
+        : `Nova versão ${ultima.version}`,
     });
+    if (deltaCompativel && ultima.delta?.url) {
+      const desktop = (window as unknown as { cfDesktop?: Desktop }).cfDesktop;
+      if (desktop?.ativo && desktop.baixarDelta) {
+        const versao = ultima.version;
+        const deltaUrl = ultima.delta.url;
+        void desktop
+          .baixarDelta(deltaUrl)
+          .then(() => {
+            emitir({
+              estado: "pronto",
+              detalhe: `Atualização ${versao} pronta. Reinicie para aplicar só os arquivos novos.`,
+            });
+          })
+          .catch((e: unknown) => {
+            emitir({
+              estado: "disponivel",
+              deltaUrl: null,
+              detalhe: e instanceof Error ? e.message : "Delta indisponível. Use o instalador completo.",
+            });
+          });
+      } else {
+        emitir({ estado: "disponivel", detalhe: `Nova versão ${ultima.version}` });
+      }
+    }
     return status;
   } catch (e) {
     emitir({
@@ -140,13 +174,18 @@ export async function checarUpdate(): Promise<StatusUpdate> {
   }
 }
 
-/** Confirmação do usuário. No Windows desktop instala em silêncio e reabre. No navegador, baixa o arquivo. */
+/** Confirmação do usuário. Delta já baixado só pede o reinício. Sem delta, baixa o instalador inteiro. */
 export async function confirmarAtualizacao(): Promise<void> {
+  const desktop = (window as unknown as { cfDesktop?: Desktop }).cfDesktop;
+  if (desktop?.ativo && desktop.aplicarDelta && status.estado === "pronto") {
+    emitir({ estado: "baixando", detalhe: "Aplicando arquivos e reiniciando…" });
+    await desktop.aplicarDelta();
+    return;
+  }
   const url = status.url;
   if (!url) return;
-  const desktop = (window as unknown as { cfDesktop?: Desktop }).cfDesktop;
   if (desktop?.ativo && desktop.aplicarAtualizacao && /^https:\/\//.test(url)) {
-    emitir({ estado: "baixando", detalhe: "Baixando e instalando…" });
+    emitir({ estado: "baixando", detalhe: "Baixando o instalador completo…" });
     await desktop.aplicarAtualizacao(url);
     return;
   }

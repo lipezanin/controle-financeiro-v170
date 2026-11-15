@@ -5,9 +5,8 @@ import { SelectCadastro } from "@/components/select-cadastro";
 import { ConferenciaCaixaPainel } from "@/components/conferencia-caixa";
 import { ExtratoInternacional } from "@/components/extrato-internacional";
 import { FormRfInternacional } from "@/components/form-rf-internacional";
-import { FormTxInternacional } from "@/components/form-tx-internacional";
 import { LancamentosRapidos, type AbaLancamento } from "@/components/lancamentos";
-import { NotaInternacional } from "@/components/nota-internacional";
+import { NotaCorretagem } from "@/components/nota-corretagem";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { usePeriodo } from "@/hooks/periodo-context";
@@ -54,11 +53,15 @@ const TIPOS = [
   "extrato_int",
   "rf_int",
   "tx_int",
+  "extrato_corretora",
 ] as const;
 type TipoAba = (typeof TIPOS)[number];
 
 const META: Record<TipoAba, { title: string; desc: string }> = {
-  nota: { title: "Nota de corretagem", desc: "Ordens da nota com taxas proporcionais, em um único confirmar." },
+  nota: {
+    title: "Nota de corretagem",
+    desc: "Origem nacional ou internacional. Uma ordem no início; as demais entram em Adicionar transação.",
+  },
   extrato: { title: "Extrato bancário", desc: "Várias linhas de rendimento da mesma instituição, em um único confirmar." },
   imovel: { title: "Lançar imóvel", desc: "Parcela ou aquisição. ITBI e cartório entram no custo médio." },
   tx: { title: "Transação avulsa", desc: "Compra, venda e demais movimentações da carteira." },
@@ -81,6 +84,10 @@ const META: Record<TipoAba, { title: string; desc: string }> = {
   tx_int: {
     title: "Transação avulsa internacional",
     desc: "Compra ou venda fora da nota, com a mesma regra de câmbio efetivo.",
+  },
+  extrato_corretora: {
+    title: "Extrato da corretora",
+    desc: "Proventos e créditos recebidos na corretora. O extrato do banco fica em Financeiro.",
   },
 };
 
@@ -117,7 +124,13 @@ function Pagina() {
     setDesps(d);
     setRends(r);
     setCx(c.movimentos);
-    setSel([]);
+    const vivos = new Set<number>([
+      ...t.map((x) => x.id),
+      ...d.map((x) => x.id),
+      ...r.map((x) => x.id),
+      ...c.movimentos.map((x) => x.id),
+    ]);
+    setSel((atual) => atual.filter((id) => vivos.has(id)));
   }, []);
 
   useEffect(() => {
@@ -161,11 +174,14 @@ function Pagina() {
     await carregar();
   }
 
-  const mostraDiario = tipo === "tx" || tipo === "desp" || tipo === "rend" || tipo === "caixa";
+  const mostraDiario = tipo === "desp" || tipo === "rend" || tipo === "caixa";
+  const notaUnificada = tipo === "nota" || tipo === "nota_int" || tipo === "tx" || tipo === "tx_int";
   const abaForm =
-    tipo === "conferencia" || tipo === "nota_int" || tipo === "extrato_int" || tipo === "rf_int" || tipo === "tx_int"
-      ? null
-      : (tipo as AbaLancamento);
+    tipo === "extrato_corretora"
+      ? "extrato"
+      : tipo === "conferencia" || tipo === "extrato_int" || tipo === "rf_int" || notaUnificada
+        ? null
+        : (tipo as AbaLancamento);
   const meta = META[tipo];
 
   return (
@@ -176,14 +192,15 @@ function Pagina() {
 
       {tipo === "conferencia" ? (
         <ConferenciaCaixaPainel onAjuste={() => void carregar()} />
-      ) : tipo === "nota_int" ? (
-        <NotaInternacional onOk={() => void carregar()} />
+      ) : notaUnificada ? (
+        <NotaCorretagem
+          origemInicial={tipo === "nota_int" || tipo === "tx_int" ? "Internacional" : "Nacional"}
+          onOk={() => void carregar()}
+        />
       ) : tipo === "extrato_int" ? (
         <ExtratoInternacional onOk={() => void carregar()} />
       ) : tipo === "rf_int" ? (
         <FormRfInternacional onOk={() => void carregar()} />
-      ) : tipo === "tx_int" ? (
-        <FormTxInternacional onOk={() => void carregar()} />
       ) : (
         <LancamentosRapidos abaFixa={abaForm ?? "tx"} onOk={() => void carregar()} />
       )}
@@ -204,69 +221,6 @@ function Pagina() {
           </div>
 
           <div className="mt-4 overflow-x-auto rounded-[16px] border border-border">
-            {tipo === "tx" ? (
-              <table className="zebra min-w-[860px] w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-surface-2 text-[11px] uppercase tracking-[0.12em] text-muted">
-                    <th className="px-2 py-2">
-                      <input
-                        type="checkbox"
-                        checked={sel.length === linhasTx.length && linhasTx.length > 0}
-                        onChange={(e) => setSel(e.target.checked ? linhasTx.map((x) => x.id) : [])}
-                      />
-                    </th>
-                    <th className="px-2 py-2">Data</th>
-                    <th className="px-2 py-2">Tipo</th>
-                    <th className="px-2 py-2">Ticker</th>
-                    <th className="px-2 py-2">Categoria</th>
-                    <th className="px-2 py-2 text-right">Qtd</th>
-                    <th className="px-2 py-2 text-right">Valor</th>
-                    <th className="px-2 py-2" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {linhasTx.map((x) => (
-                    <tr key={x.id}>
-                      <td className="px-2 py-1.5">
-                        <input
-                          type="checkbox"
-                          checked={sel.includes(x.id)}
-                          onChange={(e) =>
-                            setSel(e.target.checked ? [...sel, x.id] : sel.filter((i) => i !== x.id))
-                          }
-                        />
-                      </td>
-                      {editId === x.id ? (
-                        <EditorTx
-                          linha={x}
-                          onCancel={() => setEditId(null)}
-                          onOk={async (v) => {
-                            await atualizarTransacao(x.id, v);
-                            setEditId(null);
-                            await carregar();
-                          }}
-                        />
-                      ) : (
-                        <>
-                          <td className="px-2 py-1.5 font-mono">{formatData(x.data)}</td>
-                          <td className="px-2 py-1.5">{x.tipo}</td>
-                          <td className="px-2 py-1.5 font-medium">{x.ticker}</td>
-                          <td className="px-2 py-1.5 text-muted">{x.categoria}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{x.quantidade}</td>
-                          <td className="px-2 py-1.5 text-right font-mono">{formatBRL(x.valorBrl)}</td>
-                          <td className="px-2 py-1.5">
-                            <button type="button" className="text-accent" onClick={() => setEditId(x.id)}>
-                              Editar
-                            </button>
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : null}
-
             {tipo === "desp" ? (
               <TabelaSimples
                 cols={["Venc.", "Cat.", "Descrição", "Valor", "Sit."]}
@@ -363,6 +317,16 @@ function Pagina() {
   );
 }
 
+function chaveCelula(v: string | number | null | undefined): string | number {
+  if (typeof v === "number") return v;
+  const s = String(v ?? "");
+  const data = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (data) return `${data[3]}-${data[2]}-${data[1]}`;
+  const dinheiro = s.replace(/\s/g, "").replace("R$", "");
+  if (/^-?[\d.]+,\d{2}$/.test(dinheiro)) return Number(dinheiro.replace(/\./g, "").replace(",", "."));
+  return s;
+}
+
 function TabelaSimples({
   cols,
   rows,
@@ -381,6 +345,17 @@ function TabelaSimples({
   editor?: (id: number) => React.ReactNode;
 }) {
   const ids = rows.map((r) => Number(r[0]));
+  const [col, setCol] = useState(0);
+  const [dir, setDir] = useState<"asc" | "desc">("asc");
+  const ordenadas = useMemo(() => {
+    const sinal = dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      const va = chaveCelula(a[col + 1]);
+      const vb = chaveCelula(b[col + 1]);
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * sinal;
+      return String(va).localeCompare(String(vb), "pt-BR", { numeric: true }) * sinal;
+    });
+  }, [rows, col, dir]);
   return (
     <table className="zebra min-w-[720px] w-full text-left text-xs">
       <thead>
@@ -392,16 +367,28 @@ function TabelaSimples({
               onChange={(e) => setSel(e.target.checked ? ids : [])}
             />
           </th>
-          {cols.map((c) => (
+          {cols.map((c, i) => (
             <th key={c} className="px-2 py-2">
-              {c}
+              <button
+                type="button"
+                onClick={() => {
+                  if (col === i) setDir((d) => (d === "asc" ? "desc" : "asc"));
+                  else {
+                    setCol(i);
+                    setDir("asc");
+                  }
+                }}
+              >
+                {c}
+                {col === i ? (dir === "asc" ? " ↑" : " ↓") : ""}
+              </button>
             </th>
           ))}
           <th className="px-2 py-2" />
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => {
+        {ordenadas.map((r) => {
           const id = Number(r[0]);
           return (
             <tr key={id}>

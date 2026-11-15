@@ -6,6 +6,7 @@ import type { Database } from "sql.js";
 import { consultar, getDb } from "@/lib/financeiro/db";
 import { CLASSES_INVESTIMENTO } from "@/lib/financeiro/theme";
 import { resumirPatrimonio } from "@/services/patrimonio-service";
+import { ehImovel, ehSaidaImovel } from "@/lib/financeiro/imovel";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 const EPS = 1e-8;
@@ -16,6 +17,7 @@ const GRUPO_DA_CATEGORIA: Record<string, string> = {
   "ETF Brasil": "ETF's Nacionais",
   BDR: "BDR",
   Imóvel: "Imóveis",
+  Imóveis: "Imóveis",
   "Previdência Privada": "Previdência Privada",
   Stocks: "Stocks",
   "ETF USA": "ETF's USA",
@@ -261,6 +263,18 @@ function posicoesDoLivro(
     const tipo = str(r.tipo);
     const qtd = Math.abs(num(r.quantidade));
     const valor = Math.abs(num(r.valor));
+    if (ehImovel(categoria)) {
+      a.movimentos += 1;
+      if (ehSaidaImovel(tipo ?? "")) {
+        a.qtd = 0;
+        a.custo = 0;
+      } else if (valor > 0) {
+        a.qtd = 1;
+        a.custo += valor;
+        a.aportes += valor;
+      }
+      continue;
+    }
     const compra = tipo === "Compra" || tipo === "Parcela Imóvel" || tipo === "ITBI / Cartório";
     if (compra || tipo === "Venda") a.movimentos += 1;
     if (compra) {
@@ -278,9 +292,10 @@ function posicoesDoLivro(
     }
   }
   return [...mapa.values()].map((a) => {
+    const imovel = ehImovel(a.categoria);
     const fechou = a.movimentos > 0 && a.qtd <= EPS;
-    const qtd = fechou ? 0 : a.qtd > EPS ? a.qtd : a.snapQtd;
-    const custo = qtd > EPS ? (a.qtd > EPS ? a.custo : a.snapCusto) : 0;
+    const qtd = imovel ? (a.custo > EPS ? 1 : 0) : fechou ? 0 : a.qtd > EPS ? a.qtd : a.snapQtd;
+    const custo = imovel ? (qtd > EPS ? a.custo : 0) : qtd > EPS ? (a.qtd > EPS ? a.custo : a.snapCusto) : 0;
     return montarPosicao({
       chave: `tx:${a.categoria}:${a.ticker}`,
       ticker: a.ticker,
@@ -381,6 +396,13 @@ export async function listarCarteira(): Promise<Carteira> {
       if (r.t) prov12.set(String(r.t), num(r.v));
     }
     for (const p of todas) {
+      if (p.grupo === "Imóveis") {
+        p.precoAtual = null;
+        p.valorMercado = p.ativa ? p.valorInvestido : 0;
+        p.lucroProventos = p.proventosLiq;
+        p.dividendYield = null;
+        continue;
+      }
       const preco = mapaPreco.get(p.ticker.toUpperCase());
       if (preco && p.quantidade > EPS) {
         p.precoAtual = preco;
@@ -458,8 +480,7 @@ function historicoTicker(db: Database, ticker: string): HistoricoOp[] {
     `SELECT data, tipo_operacao AS tipo, quantidade, valor_brl AS valor
      FROM transacoes
      WHERE UPPER(ticker) = UPPER(?)
-     ORDER BY data DESC, id DESC
-     LIMIT 40`,
+     ORDER BY data DESC, id DESC`,
     [ticker],
   );
   if (linhas.length) {

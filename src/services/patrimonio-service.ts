@@ -6,9 +6,10 @@ import type { Database } from "sql.js";
 import { consultar, getDb } from "@/lib/financeiro/db";
 import { prefixoSql, prefixoSqlAte, type Periodo } from "@/lib/financeiro/periodo";
 import { CLASSES_INVESTIMENTO, FAIXAS_LIQUIDEZ } from "@/lib/financeiro/theme";
+import { SQL_COMPRAS } from "@/lib/financeiro/imovel";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
-const COMPRAS = "('Compra','Parcela Imóvel','ITBI / Cartório')";
+const COMPRAS = SQL_COMPRAS;
 const RF_ATIVA =
   "tipo_movimento = 'Aplicação' AND COALESCE(valor_aplicado, 0) > 0 AND COALESCE(status, 'Ativo') <> 'Resgatado'";
 
@@ -126,8 +127,11 @@ export async function resumirPatrimonio(periodo?: Periodo): Promise<ResumoPatrim
   );
   const caixaFisico = num(
     db,
-    `SELECT COALESCE(SUM(CASE tipo WHEN 'Depósito' THEN valor ELSE -valor END), 0) AS v
-     FROM caixa_fisico WHERE ${ate.sql}`,
+    `SELECT COALESCE(SUM(CASE
+        WHEN lower(replace(replace(replace(tipo,'ó','o'),'Ó','o'),'á','a')) IN ('saque','retirada','saida')
+        THEN -ABS(valor) ELSE ABS(valor) END), 0) AS v
+     FROM caixa_fisico
+     WHERE (deleted_at IS NULL OR TRIM(CAST(deleted_at AS TEXT)) = '') AND ${ate.sql}`,
     ate.params,
   );
   const rfTotal = num(
@@ -171,40 +175,50 @@ export async function resumirPatrimonio(periodo?: Periodo): Promise<ResumoPatrim
     BDR: bdr,
   };
 
-  const d2Cadastro =
-    num(
-      db,
-      `SELECT COALESCE(SUM(CASE tipo_operacao WHEN 'Compra' THEN valor_brl
-        WHEN 'Venda' THEN -valor_brl ELSE 0 END), 0) AS v
-       FROM transacoes WHERE liquidez = 'D+2' AND ${ate.sql}`,
-      ate.params,
-    ) + rfFaixa(db, "D+2", ateRf);
-
-  const d2Fallback =
-    acoes +
-    fiis +
-    etfBr +
-    bdr -
-    vendasCat(db, "Ações", ate) -
-    vendasCat(db, "Fundos Imobiliários", ate) -
-    vendasCat(db, "ETF Brasil", ate) -
-    vendasCat(db, "BDR", ate);
-
-  const d2 = d2Cadastro === 0 ? d2Fallback : d2Cadastro;
-  const d0 = rfFaixa(db, "D+0", ateRf);
-  const d1 = rfFaixa(db, "D+1", ateRf);
-  const d30 = rfFaixa(db, "D+30", ateRf);
-  const d360 = rfFaixa(db, "D+360", ateRf);
-  const venc = rfFaixa(db, "No Vencimento", ateRf);
-
+  const posicoes = consultar(
+    db,
+    `SELECT categoria, liquidez, COALESCE(valor_atual, valor_investido, 0) AS v
+     FROM posicoes
+     WHERE COALESCE(ativa, 1) = 1 AND ABS(COALESCE(quantidade, 0)) > 0.0000001`,
+  );
   const mapaLiq: Record<string, number> = {
-    "D+0": d0,
-    "D+1": d1,
-    "D+2": d2,
-    "D+30": d30,
-    "D+360": d360,
-    "No Vencimento": venc,
+    "D+0": 0,
+    "D+1": 0,
+    "D+2": 0,
+    "D+30": 0,
+    "D+360": 0,
+    "No Vencimento": 0,
   };
+  const bolsa = new Set(["Ações", "Fundos Imobiliários", "ETF Brasil", "BDR", "Stocks", "ETF USA", "Reits"]);
+  if (posicoes.length) {
+    for (const r of posicoes) {
+      const categoria = String(r.categoria ?? "");
+      if (categoria === "Imóvel" || categoria === "Imóveis") continue;
+      const marcada = String(r.liquidez ?? "");
+      const faixa = (FAIXAS_LIQUIDEZ as readonly string[]).includes(marcada)
+        ? marcada
+        : bolsa.has(categoria)
+          ? "D+2"
+          : "No Vencimento";
+      mapaLiq[faixa] = (mapaLiq[faixa] ?? 0) + (Number(r.v) || 0);
+    }
+  } else {
+    mapaLiq["D+0"] = rfFaixa(db, "D+0", ateRf);
+    mapaLiq["D+1"] = rfFaixa(db, "D+1", ateRf);
+    mapaLiq["D+2"] =
+      acoes +
+      fiis +
+      etfBr +
+      bdr -
+      vendasCat(db, "Ações", ate) -
+      vendasCat(db, "Fundos Imobiliários", ate) -
+      vendasCat(db, "ETF Brasil", ate) -
+      vendasCat(db, "BDR", ate) +
+      rfFaixa(db, "D+2", ateRf);
+    mapaLiq["D+30"] = rfFaixa(db, "D+30", ateRf);
+    mapaLiq["D+360"] = rfFaixa(db, "D+360", ateRf);
+    mapaLiq["No Vencimento"] = rfFaixa(db, "No Vencimento", ateRf);
+  }
 
   const porCatMes = consultar(
     db,
@@ -243,13 +257,13 @@ export async function resumirPatrimonio(periodo?: Periodo): Promise<ResumoPatrim
       valor: mapaClasse[classe] ?? 0,
     })),
     liquidez: FAIXAS_LIQUIDEZ.map((faixa) => ({ faixa, valor: mapaLiq[faixa] ?? 0 })),
-    liquidezRapida: d0 + d1 + d2 + caixaFisico,
+    liquidezRapida: (mapaLiq["D+0"] ?? 0) + (mapaLiq["D+1"] ?? 0) + (mapaLiq["D+2"] ?? 0) + caixaFisico,
     rendimentosMensais,
     contagens: {
       transacoes: num(db, "SELECT COUNT(*) AS v FROM transacoes"),
       rendaFixa: num(db, "SELECT COUNT(*) AS v FROM renda_fixa"),
       rendimentos: num(db, "SELECT COUNT(*) AS v FROM rendimentos"),
-      despesas: num(db, "SELECT COUNT(*) AS v FROM despesas"),
+      despesas: num(db, "SELECT COUNT(*) AS v FROM despesas WHERE deleted_at IS NULL OR TRIM(deleted_at) = ''"),
       caixa: num(db, "SELECT COUNT(*) AS v FROM caixa_fisico"),
     },
   };

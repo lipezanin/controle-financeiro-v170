@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { TickerCampo } from "@/components/ticker-campo";
 import { CampoValor } from "@/components/campo-valor";
 import { ExtratoBancario } from "@/components/extrato-bancario";
 import { FormImovel } from "@/components/form-imovel";
@@ -60,6 +61,7 @@ export function LancamentosRapidos({
   const [origemTx, setOrigemTx] = useState("Nacional");
   const [qtdTx, setQtdTx] = useState("");
   const [valorTx, setValorTx] = useState("");
+  const [tickerTx, setTickerTx] = useState("");
   const [catDesp, setCatDesp] = useState("Moradia");
   const [instDesp, setInstDesp] = useState("");
   const [valorDesp, setValorDesp] = useState("");
@@ -71,13 +73,14 @@ export function LancamentosRapidos({
   async function onTx(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
     setErro(null);
     try {
       await lancarTransacao({
         data: String(fd.get("data")),
         tipo: String(fd.get("tipo")),
         categoria: String(fd.get("categoria")),
-        ticker: String(fd.get("ticker")),
+        ticker: tickerTx,
         quantidade: qtdTx,
         valorBrl: valorTx,
         nota: String(fd.get("nota") ?? ""),
@@ -89,7 +92,8 @@ export function LancamentosRapidos({
       setMsg("Transação lançada.");
       setQtdTx("");
       setValorTx("");
-      e.currentTarget.reset();
+      setTickerTx("");
+      form.reset();
       onOk?.();
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Falha no lançamento");
@@ -99,6 +103,7 @@ export function LancamentosRapidos({
   async function onDesp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
     setErro(null);
     try {
       await lancarDespesa({
@@ -111,7 +116,7 @@ export function LancamentosRapidos({
       });
       setMsg("Despesa lançada.");
       setValorDesp("");
-      e.currentTarget.reset();
+      form.reset();
       onOk?.();
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Falha no lançamento");
@@ -121,6 +126,7 @@ export function LancamentosRapidos({
   async function onRend(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
     setErro(null);
     try {
       await lancarRendimento({
@@ -133,7 +139,7 @@ export function LancamentosRapidos({
       });
       setMsg("Rendimento lançado.");
       setValorRend("");
-      e.currentTarget.reset();
+      form.reset();
       onOk?.();
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Falha no lançamento");
@@ -219,7 +225,13 @@ export function LancamentosRapidos({
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
             Ticker
-            <input name="ticker" required placeholder="BBAS3" className={campoCls()} />
+            <TickerCampo
+              name="ticker"
+              required
+              value={tickerTx}
+              onChange={setTickerTx}
+              onCategoria={(c) => setCatTx(c)}
+            />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
             Liquidez

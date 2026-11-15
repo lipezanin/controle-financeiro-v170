@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Grava a versão da tag no app antes do build do instalador.
- * Uso: node scripts/carimbar-versao.mjs 2.0.1
+ * Uso: node scripts/carimbar-versao.mjs 2.0.008
+ * O terceiro número aceita zero à esquerda. A comparação no app é numérica.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

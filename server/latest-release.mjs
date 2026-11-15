@@ -44,7 +44,13 @@ export async function lerLatest() {
       try {
         const j = JSON.parse(texto);
         if (j && typeof j.version === "string" && typeof j.url === "string" && j.url.startsWith("https://")) {
-          return { version: j.version, url: j.url, notes: j.notes ?? null, fonte: "github" };
+          return {
+            version: j.version,
+            url: j.url,
+            notes: j.notes ?? null,
+            fonte: "github",
+            delta: j.delta && typeof j.delta.url === "string" ? j.delta : null,
+          };
         }
       } catch {
         /* corpo não é JSON */
