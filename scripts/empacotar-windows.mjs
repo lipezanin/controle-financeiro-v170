@@ -50,18 +50,22 @@ function acharOutput() {
 }
 
 function acharMakensis() {
-  for (const p of ["/tmp/nsis/usr/bin/makensis", "makensis"]) {
+  const candidatos = [
+    { bin: "/tmp/nsis/usr/bin/makensis", nsisdir: "/tmp/nsis/usr/share/nsis" },
+    { bin: "makensis", nsisdir: "/usr/share/nsis" },
+  ];
+  for (const c of candidatos) {
     try {
-      execFileSync(p === "makensis" ? "makensis" : p, ["-VERSION"], {
-        env: { ...process.env, NSISDIR: "/tmp/nsis/usr/share/nsis" },
+      execFileSync(c.bin, ["-VERSION"], {
+        env: { ...process.env, NSISDIR: c.nsisdir },
         stdio: "pipe",
       });
-      return p;
+      return c;
     } catch {
       /* tenta o próximo */
     }
   }
-  throw new Error("makensis não encontrado. Extraia o pacote nsis Debian em /tmp/nsis.");
+  throw new Error("makensis não encontrado. Instale o pacote nsis ou extraia-o em /tmp/nsis.");
 }
 
 async function baixar(url, dest) {
@@ -144,14 +148,14 @@ function copiarInstaladores() {
 }
 
 function compilarSetup() {
-  const makensis = acharMakensis();
-  console.log("NSIS:", makensis, "versão app:", VERSAO);
+  const nsis = acharMakensis();
+  console.log("NSIS:", nsis.bin, "versão app:", VERSAO);
   execFileSync(
-    makensis,
+    nsis.bin,
     [`-DSRC=${OUT_DIR}`, `-DOUT=${SETUP_TMP}`, `-DAPPVER=${VERSAO}`, `-DAPPVERNUM=${versaoArquivoWindows(VERSAO)}`, NSI],
     {
       stdio: "inherit",
-      env: { ...process.env, NSISDIR: process.env.NSISDIR || "/tmp/nsis/usr/share/nsis" },
+      env: { ...process.env, NSISDIR: nsis.nsisdir },
     },
   );
   if (!existsSync(SETUP_TMP)) throw new Error("Setup.exe não foi gerado");

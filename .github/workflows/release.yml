@@ -59,6 +59,5 @@ jobs:
           name: Controle Financeiro ${{ github.ref_name }}
           files: |
             artifacts/ControleFinanceiro-Setup.exe
-            artifacts/ControleFinanceiro-delta-*.zip
             artifacts/latest.json
           generate_release_notes: true

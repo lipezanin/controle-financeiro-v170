@@ -41,7 +41,7 @@ export function gerarDelta(outDir, versao, artifacts) {
   }
   const nome = `ControleFinanceiro-delta-${versao}.zip`;
   const zip = join(artifacts, nome);
-  if (mudou.length) {
+  if (mudou.length && anterior.version) {
     const lista = join(artifacts, "delta-lista.txt");
     writeFileSync(lista, mudou.join("\n"), "utf8");
     execFileSync("python3", ["-c", `
