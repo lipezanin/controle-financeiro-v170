@@ -469,30 +469,44 @@ async function puxarTabela(tabela: TabelaEspelho, userId: string): Promise<numbe
     const tl = loc ? ts(loc.updated_at) : 0;
     if (loc && meta.temId && n.local_id != null && String(loc.id) !== String(n.local_id)) continue;
     if (!loc) {
+      if (tabela === "posicoes" && !posicaoAindaExiste(db, n)) continue;
       inserirDoNuvem(db, tabela, n);
       locais.push({ ...n, id: n.local_id ?? n.id });
       aplicados += 1;
       continue;
     }
-    const localPending = loc.sync_status === "pending";
-    if (localPending && tn > tl) {
-      executar(db, `INSERT INTO sync_conflitos (tabela, chave, local_json, nuvem_json, detectado_em) VALUES (?,?,?,?,?)`, [
-        tabela,
-        chave,
-        JSON.stringify(loc),
-        JSON.stringify(n),
-        new Date().toISOString(),
-      ]);
-      if (meta.temId) executar(db, `UPDATE ${tabela} SET sync_status='conflict' WHERE id=?`, [Number(loc.id)]);
-      continue;
-    }
-    if (tn > tl && !localPending) {
+    const localPendente = loc.sync_status === "pending" || loc.sync_status === "conflict";
+    if (localPendente) continue;
+    if (tabela === "posicoes" && !posicaoAindaExiste(db, n)) continue;
+    if (tn > tl) {
       inserirDoNuvem(db, tabela, n);
       aplicados += 1;
     }
   }
   void userId;
   return aplicados;
+}
+
+function posicaoAindaExiste(db: Awaited<ReturnType<typeof getDb>>, n: LinhaSql): boolean {
+  const ticker = String(n.ticker ?? "");
+  if (!ticker) return false;
+  const cat = String(n.categoria ?? "");
+  if (cat === "Renda Fixa") {
+    return Boolean(
+      consultar(
+        db,
+        `SELECT 1 AS ok FROM renda_fixa WHERE COALESCE(ticker, nome) = ? AND COALESCE(status, 'Ativo') <> 'Resgatado' LIMIT 1`,
+        [ticker],
+      )[0],
+    );
+  }
+  return Boolean(
+    consultar(
+      db,
+      `SELECT 1 AS ok FROM transacoes WHERE ticker = ? AND COALESCE(categoria, '') = ? AND (deleted_at IS NULL OR deleted_at = '') LIMIT 1`,
+      [ticker, cat],
+    )[0],
+  );
 }
 
 function inserirDoNuvem(db: Awaited<ReturnType<typeof getDb>>, tabela: TabelaEspelho, n: LinhaSql): void {

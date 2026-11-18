@@ -16,7 +16,7 @@ SetCompressor /SOLID lzma
 !include "x64.nsh"
 
 !ifndef APPVER
-  !define APPVER "2.0.008"
+  !define APPVER "2.0.009"
 !endif
 !ifndef APPVERNUM
   !define APPVERNUM "${APPVER}.0"

@@ -94,8 +94,8 @@ function Dashboard() {
     <div className="mx-auto max-w-6xl">
       <SectionTitle
         kicker="Início"
-        title="01 — Investimentos · Visão geral"
-        description="Cards e composição da carteira. Importação e instalador ficam em Manutenção."
+        title="Dashboard"
+        description="Visão geral do patrimônio. Carteira, imóveis, caixa, IRPF e lançamentos estão nos menus ao lado, já abertos."
       />
 
       <div className="mb-6">

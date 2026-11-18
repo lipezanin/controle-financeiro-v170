@@ -754,7 +754,7 @@ export async function atualizarTransacao(
   const db = await getDb();
   executar(
     db,
-    `UPDATE transacoes SET data=?, tipo_operacao=?, categoria=?, ticker=?, quantidade=?, valor_brl=? WHERE id=?`,
+    `UPDATE transacoes SET data=?, tipo_operacao=?, categoria=?, ticker=?, quantidade=?, valor_brl=?, sync_status='pending', updated_at=datetime('now') WHERE id=?`,
     [
       input.data,
       input.tipo,

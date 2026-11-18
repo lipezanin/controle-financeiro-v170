@@ -274,7 +274,23 @@ function migrarSchema(db: Database): void {
       PRIMARY KEY (indice, data)
     )
   `);
-  db.run("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('schema_versao', '11')");
+  db.run(`
+    CREATE TABLE IF NOT EXISTS contas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      apelido TEXT NOT NULL,
+      instituicao TEXT NOT NULL,
+      tipo TEXT NOT NULL,
+      praca TEXT NOT NULL,
+      moeda TEXT NOT NULL DEFAULT 'BRL',
+      saldo_inicial_centavos INTEGER NOT NULL DEFAULT 0,
+      data_saldo_inicial TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ativa'
+    )
+  `);
+  garantirColuna(db, "transacoes", "conta_id", "INTEGER");
+  garantirColuna(db, "rendimentos", "conta_id", "INTEGER");
+  garantirColuna(db, "despesas", "conta_id", "INTEGER");
+  db.run("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('schema_versao', '12')");
 }
 
 /** Devolve a instância única do SQLite, criando o schema na primeira vez. */

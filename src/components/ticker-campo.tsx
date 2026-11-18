@@ -19,6 +19,7 @@ export function TickerCampo({
 }) {
   const [hits, setHits] = useState<HitTicker[]>([]);
   const [aberto, setAberto] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
   const caixa = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,7 +53,17 @@ export function TickerCampo({
           setAberto(true);
         }}
         onFocus={() => hits.length && setAberto(true)}
-        onBlur={() => setTimeout(() => setAberto(false), 180)}
+        onBlur={(e) => {
+          const digitado = e.target.value.trim().toUpperCase();
+          setTimeout(() => setAberto(false), 180);
+          if (digitado.length < 4) return;
+          window.setTimeout(() => {
+            void buscarTickers(digitado).then((lista) => {
+              const ok = lista.some((h) => h.symbol.toUpperCase() === digitado);
+              if (!ok) setAviso(digitado);
+            });
+          }, 220);
+        }}
       />
       {aberto && hits.length ? (
         <ul className="absolute z-30 mt-1 max-h-56 w-72 overflow-auto rounded-md border border-border bg-surface text-left shadow-lg">
@@ -75,6 +86,21 @@ export function TickerCampo({
             </li>
           ))}
         </ul>
+      ) : null}
+      {aviso ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="max-w-sm rounded-[16px] border border-border bg-card p-4 shadow-xl">
+            <p className="text-sm font-medium text-fg">Ticker não encontrado</p>
+            <p className="mt-2 text-sm text-muted">
+              {aviso} não aparece na consulta da bolsa. Confira a digitação antes de lançar.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded-md bg-accent px-3 py-1.5 text-sm text-white" onClick={() => setAviso(null)}>
+                Vou corrigir
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

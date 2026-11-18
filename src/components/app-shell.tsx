@@ -1,5 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+  ArrowLeftRight,
+  Building2,
   Banknote,
   CandlestickChart,
   ChevronDown,
@@ -70,8 +72,14 @@ const NAV: {
       { label: "Transações", to: "/transacoes", search: { livro: "bolsa" } },
       { label: "Nota de corretagem", to: "/lancamentos", search: { tipo: "nota" } },
       { label: "Extrato da corretora", to: "/lancamentos", search: { tipo: "extrato_corretora" } },
-      { label: "Câmbio", to: "/cambio" },
     ],
+  },
+  {
+    label: "Câmbio",
+    hint: "Moeda comprada e ainda não investida",
+    icon: ArrowLeftRight,
+    to: "/cambio",
+    filhos: [],
   },
   {
     label: "Renda fixa",
@@ -132,6 +140,16 @@ const NAV: {
     ],
   },
   {
+    label: "Contas",
+    hint: "Bancos e corretoras",
+    icon: Building2,
+    to: "/contas",
+    filhos: [
+      { label: "Visão geral", to: "/contas", search: { aba: "visao" } },
+      { label: "Nova conta", to: "/contas", search: { aba: "nova" } },
+    ],
+  },
+  {
     label: "Metas",
     hint: "Cruzamento de dados",
     icon: Target,
@@ -167,21 +185,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const hashAtual = useRouterState({ select: (s) => s.location.hash.replace(/^#/, "") });
   const [abertos, setAbertos] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
-    for (const g of NAV) if (g.to && pathname.startsWith(g.to) && g.to !== "/") o[g.label] = true;
-    if (pathname.startsWith("/imoveis")) o["Imóveis"] = true;
-    if (pathname.startsWith("/cambio")) o["Investimentos"] = true;
-    if (pathname === "/transacoes") {
-      const livro = new URLSearchParams(search.replace(/^\?/, "")).get("livro") ?? "";
-      o[livro === "imoveis" ? "Imóveis" : "Investimentos"] = true;
-    }
-    if (pathname === "/lancamentos") {
-      const tipo = new URLSearchParams(search.replace(/^\?/, "")).get("tipo") ?? "";
-      if (tipo === "caixa" || tipo === "conferencia") o["Caixa físico"] = true;
-      else if (tipo === "desp" || tipo === "rend" || tipo === "extrato" || tipo === "extrato_int") o["Financeiro"] = true;
-      else if (tipo === "extrato_corretora" || tipo === "nota" || tipo === "tx" || tipo === "nota_int" || tipo === "tx_int") o["Investimentos"] = true;
-      else if (tipo === "rf_int") o["Renda fixa"] = true;
-      else o["Investimentos"] = true;
-    }
+    for (const g of NAV) if (g.filhos.length && g.label !== "Configurações") o[g.label] = true;
     return o;
   });
 

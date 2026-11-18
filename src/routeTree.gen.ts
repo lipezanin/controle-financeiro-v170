@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CaixaRouteImport } from './routes/caixa'
 import { Route as CambioRouteImport } from './routes/cambio'
 import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
+import { Route as ContasRouteImport } from './routes/contas'
 import { Route as FinanceiroRouteImport } from './routes/financeiro'
 import { Route as ImoveisRouteImport } from './routes/imoveis'
 import { Route as InvestimentosRouteImport } from './routes/investimentos'
@@ -43,6 +44,11 @@ const CambioRoute = CambioRouteImport.update({
 const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
   id: '/configuracoes',
   path: '/configuracoes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContasRoute = ContasRouteImport.update({
+  id: '/contas',
+  path: '/contas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FinanceiroRoute = FinanceiroRouteImport.update({
@@ -106,6 +112,7 @@ export interface FileRoutesByFullPath {
   '/caixa': typeof CaixaRoute
   '/cambio': typeof CambioRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/contas': typeof ContasRoute
   '/financeiro': typeof FinanceiroRoute
   '/imoveis': typeof ImoveisRoute
   '/investimentos': typeof InvestimentosRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/caixa': typeof CaixaRoute
   '/cambio': typeof CambioRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/contas': typeof ContasRoute
   '/financeiro': typeof FinanceiroRoute
   '/imoveis': typeof ImoveisRoute
   '/investimentos': typeof InvestimentosRoute
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/caixa': typeof CaixaRoute
   '/cambio': typeof CambioRoute
   '/configuracoes': typeof ConfiguracoesRoute
+  '/contas': typeof ContasRoute
   '/financeiro': typeof FinanceiroRoute
   '/imoveis': typeof ImoveisRoute
   '/investimentos': typeof InvestimentosRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/caixa'
     | '/cambio'
     | '/configuracoes'
+    | '/contas'
     | '/financeiro'
     | '/imoveis'
     | '/investimentos'
@@ -177,6 +187,7 @@ export interface FileRouteTypes {
     | '/caixa'
     | '/cambio'
     | '/configuracoes'
+    | '/contas'
     | '/financeiro'
     | '/imoveis'
     | '/investimentos'
@@ -194,6 +205,7 @@ export interface FileRouteTypes {
     | '/caixa'
     | '/cambio'
     | '/configuracoes'
+    | '/contas'
     | '/financeiro'
     | '/imoveis'
     | '/investimentos'
@@ -212,6 +224,7 @@ export interface RootRouteChildren {
   CaixaRoute: typeof CaixaRoute
   CambioRoute: typeof CambioRoute
   ConfiguracoesRoute: typeof ConfiguracoesRoute
+  ContasRoute: typeof ContasRoute
   FinanceiroRoute: typeof FinanceiroRoute
   ImoveisRoute: typeof ImoveisRoute
   InvestimentosRoute: typeof InvestimentosRoute
@@ -253,6 +266,13 @@ declare module '@tanstack/react-router' {
       path: '/configuracoes'
       fullPath: '/configuracoes'
       preLoaderRoute: typeof ConfiguracoesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contas': {
+      id: '/contas'
+      path: '/contas'
+      fullPath: '/contas'
+      preLoaderRoute: typeof ContasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/financeiro': {
@@ -340,6 +360,7 @@ const rootRouteChildren: RootRouteChildren = {
   CaixaRoute: CaixaRoute,
   CambioRoute: CambioRoute,
   ConfiguracoesRoute: ConfiguracoesRoute,
+  ContasRoute: ContasRoute,
   FinanceiroRoute: FinanceiroRoute,
   ImoveisRoute: ImoveisRoute,
   InvestimentosRoute: InvestimentosRoute,
