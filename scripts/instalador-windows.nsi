@@ -16,7 +16,7 @@ SetCompressor /SOLID lzma
 !include "x64.nsh"
 
 !ifndef APPVER
-  !define APPVER "2.0.009"
+  !define APPVER "2.0.010"
 !endif
 !ifndef APPVERNUM
   !define APPVERNUM "${APPVER}.0"
@@ -27,6 +27,8 @@ OutFile "${OUT}"
 InstallDir "$PROGRAMFILES64\Controle Financeiro"
 InstallDirRegKey HKLM "Software\ControleFinanceiro" "InstallDir"
 BrandingText "Controle Financeiro ${APPVER}"
+SilentInstall silent
+SilentUnInstall silent
 
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_NOAUTOCLOSE

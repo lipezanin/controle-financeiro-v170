@@ -81,6 +81,14 @@ export async function saldoCambio(moeda = "USD"): Promise<SaldoCambio> {
   };
 }
 
+function contaEhCaixa(db: Awaited<ReturnType<typeof getDb>>, id?: number): boolean {
+  if (!id) return false;
+  const r = consultar(db, `SELECT instituicao, apelido FROM contas WHERE id = ?`, [id])[0];
+  if (!r) return false;
+  const nome = `${r.instituicao ?? ""} ${r.apelido ?? ""}`;
+  return /caixa f[íi]sico/i.test(nome);
+}
+
 export async function lancarCompraMoeda(input: {
   data: string;
   moeda?: string;
@@ -89,6 +97,8 @@ export async function lancarCompraMoeda(input: {
   iofBrl?: number;
   spreadBrl?: number;
   descricao?: string;
+  contaOrigemId?: number;
+  contaDestinoId?: number;
 }): Promise<void> {
   if (!input.data || input.quantidade <= 0 || input.valorBrl <= 0) {
     throw new Error("Informe a data, a quantidade de moeda e o valor em R$.");
@@ -99,8 +109,10 @@ export async function lancarCompraMoeda(input: {
   const db = await getDb();
   executar(
     db,
-    `INSERT INTO caixa_cambio (data, moeda, tipo, quantidade, custo_brl, iof_brl, spread_brl, cotacao, descricao)
-     VALUES (?, ?, 'Compra', ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO caixa_cambio (
+       data, moeda, tipo, quantidade, custo_brl, iof_brl, spread_brl, cotacao, descricao,
+       conta_origem_id, conta_destino_id, moeda_origem, valor_origem, moeda_destino, valor_destino
+     ) VALUES (?, ?, 'Compra', ?, ?, ?, ?, ?, ?, ?, ?, 'BRL', ?, ?, ?)`,
     [
       input.data,
       input.moeda || "USD",
@@ -110,8 +122,22 @@ export async function lancarCompraMoeda(input: {
       spread,
       custo / input.quantidade,
       input.descricao?.trim() || null,
+      input.contaOrigemId ?? null,
+      input.contaDestinoId ?? null,
+      custo,
+      input.moeda || "USD",
+      input.quantidade,
     ],
   );
+  const id = num(consultar(db, `SELECT last_insert_rowid() AS id`)[0]?.id);
+  if (contaEhCaixa(db, input.contaOrigemId)) {
+    executar(db, `INSERT INTO caixa_fisico (data, tipo, valor, descricao, cambio_id) VALUES (?, 'Saque', ?, ?, ?)`, [
+      input.data,
+      custo,
+      input.descricao?.trim() || `Compra de ${input.moeda || "USD"}`,
+      id,
+    ]);
+  }
   await salvarDb();
 }
 
@@ -121,6 +147,8 @@ export async function lancarVendaMoeda(input: {
   quantidade: number;
   valorBrl: number;
   descricao?: string;
+  contaOrigemId?: number;
+  contaDestinoId?: number;
 }): Promise<{ resultado: number }> {
   const moeda = input.moeda || "USD";
   const saldo = await saldoCambio(moeda);
@@ -135,10 +163,33 @@ export async function lancarVendaMoeda(input: {
   const db = await getDb();
   executar(
     db,
-    `INSERT INTO caixa_cambio (data, moeda, tipo, quantidade, custo_brl, iof_brl, spread_brl, cotacao, descricao)
-     VALUES (?, ?, 'Venda', ?, ?, 0, 0, ?, ?)`,
-    [input.data, moeda, input.quantidade, custo, input.valorBrl / input.quantidade, input.descricao?.trim() || null],
+    `INSERT INTO caixa_cambio (
+       data, moeda, tipo, quantidade, custo_brl, iof_brl, spread_brl, cotacao, descricao,
+       conta_origem_id, conta_destino_id, moeda_origem, valor_origem, moeda_destino, valor_destino
+     ) VALUES (?, ?, 'Venda', ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, 'BRL', ?)`,
+    [
+      input.data,
+      moeda,
+      input.quantidade,
+      custo,
+      input.valorBrl / input.quantidade,
+      input.descricao?.trim() || null,
+      input.contaDestinoId ?? null,
+      input.contaOrigemId ?? null,
+      moeda,
+      input.quantidade,
+      input.valorBrl,
+    ],
   );
+  const id = num(consultar(db, `SELECT last_insert_rowid() AS id`)[0]?.id);
+  if (contaEhCaixa(db, input.contaOrigemId)) {
+    executar(db, `INSERT INTO caixa_fisico (data, tipo, valor, descricao, cambio_id) VALUES (?, 'Depósito', ?, ?, ?)`, [
+      input.data,
+      input.valorBrl,
+      input.descricao?.trim() || `Venda de ${moeda}`,
+      id,
+    ]);
+  }
   if (Math.abs(resultado) > 0.004) {
     executar(
       db,
@@ -230,6 +281,7 @@ export async function excluirMovimentoCambio(id: number): Promise<void> {
       throw new Error("Excluir este lançamento deixaria o saldo de moeda negativo.");
     }
   }
+  executar(db, `DELETE FROM caixa_fisico WHERE cambio_id = ?`, [id]);
   executar(db, `DELETE FROM caixa_cambio WHERE id = ?`, [id]);
   await salvarDb();
 }

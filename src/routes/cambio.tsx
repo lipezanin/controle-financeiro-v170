@@ -15,6 +15,7 @@ import {
   type MovimentoCambio,
   type SaldoCambio,
 } from "@/services/caixa-cambio-service";
+import { listarContas, type Conta } from "@/services/contas-service";
 import { formatNumeroBR, parseNumeroBR } from "@/utils/numeros-br";
 
 export const Route = createFileRoute("/cambio")({
@@ -32,14 +33,20 @@ function Pagina() {
   const [dataVenda, setDataVenda] = useState(new Date().toISOString().slice(0, 10));
   const [qtdVenda, setQtdVenda] = useState("");
   const [brlVenda, setBrlVenda] = useState("");
+  const [contas, setContas] = useState<Conta[]>([]);
+  const [contaBrl, setContaBrl] = useState(0);
+  const [contaUsd, setContaUsd] = useState(0);
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const ordem = useOrdenacao<"data" | "tipo" | "qtd" | "custo" | "cotacao">("data");
 
   const carregar = useCallback(async () => {
-    const [s, rows] = await Promise.all([saldoCambio("USD"), listarCambio("USD")]);
+    const [s, rows, lista] = await Promise.all([saldoCambio("USD"), listarCambio("USD"), listarContas()]);
     setSaldo(s);
     setLista(rows);
+    setContas(lista);
+    setContaBrl((atual) => atual || lista.find((c) => c.moeda === "BRL" && c.status === "ativa")?.id || 0);
+    setContaUsd((atual) => atual || lista.find((c) => c.moeda === "USD" && c.praca === "Internacional")?.id || 0);
   }, []);
 
   useEffect(() => {
@@ -57,9 +64,9 @@ function Pagina() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
       <SectionTitle
-        kicker="Investimentos"
+        kicker="Câmbio"
         title="Câmbio"
-        description="O dólar fica numa conta separada do ativo. Você compra a moeda quando quiser e só depois investe, pelo custo médio."
+        description="Comprar dólar tira o valor da conta em reais e entra na conta internacional. O ativo só consome essa moeda depois."
       />
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <KpiCard label="Dólar na conta" value={saldo ? `US$ ${formatNumeroBR(saldo.quantidade, 2)}` : "—"} />
@@ -82,6 +89,8 @@ function Pagina() {
             valorBrl: parseNumeroBR(brl),
             iofBrl: parseNumeroBR(iof),
             spreadBrl: parseNumeroBR(spread),
+            contaOrigemId: contaBrl || undefined,
+            contaDestinoId: contaUsd || undefined,
           })
             .then(async () => {
               setMsg("Compra de dólar lançada no caixa de câmbio.");
@@ -94,7 +103,23 @@ function Pagina() {
             .catch((err: unknown) => setErro(err instanceof Error ? err.message : "Falha ao comprar moeda"));
         }}
       >
-        <p className="sm:col-span-2 lg:col-span-6 text-sm text-muted">Comprar dólar. O ativo ainda não entra aqui.</p>
+        <p className="sm:col-span-2 lg:col-span-6 text-sm text-muted">Comprar dólar. Sai da conta em reais e entra na conta em dólar.</p>
+        <label className="text-xs text-muted sm:col-span-2">
+          Conta em reais
+          <select className="mt-1 h-11 w-full rounded-md border border-input-border bg-input px-3 text-sm" value={contaBrl} onChange={(e) => setContaBrl(Number(e.target.value))}>
+            {contas.filter((c) => c.moeda === "BRL" && c.status === "ativa").map((c) => (
+              <option key={c.id} value={c.id}>{c.apelido}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-muted sm:col-span-2">
+          Conta em dólar
+          <select className="mt-1 h-11 w-full rounded-md border border-input-border bg-input px-3 text-sm" value={contaUsd} onChange={(e) => setContaUsd(Number(e.target.value))}>
+            {contas.filter((c) => c.moeda === "USD").map((c) => (
+              <option key={c.id} value={c.id}>{c.apelido}</option>
+            ))}
+          </select>
+        </label>
         <label className="text-xs text-muted">
           Data
           <input type="date" required value={data} onChange={(e) => setData(e.target.value)} className="mt-1 h-11 w-full rounded-md border border-input-border bg-input px-3 text-sm text-fg" />
@@ -129,6 +154,8 @@ function Pagina() {
             data: dataVenda,
             quantidade: parseNumeroBR(qtdVenda),
             valorBrl: parseNumeroBR(brlVenda),
+            contaOrigemId: contaBrl || undefined,
+            contaDestinoId: contaUsd || undefined,
           })
             .then(async (r) => {
               setMsg(`Dólar vendido. Resultado cambial ${formatBRL(r.resultado)}.`);

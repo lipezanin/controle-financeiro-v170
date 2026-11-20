@@ -288,8 +288,16 @@ function migrarSchema(db: Database): void {
     )
   `);
   garantirColuna(db, "transacoes", "conta_id", "INTEGER");
+  garantirColuna(db, "transacoes", "conta_destino_id", "INTEGER");
   garantirColuna(db, "rendimentos", "conta_id", "INTEGER");
   garantirColuna(db, "despesas", "conta_id", "INTEGER");
+  garantirColuna(db, "caixa_cambio", "conta_origem_id", "INTEGER");
+  garantirColuna(db, "caixa_cambio", "conta_destino_id", "INTEGER");
+  garantirColuna(db, "caixa_cambio", "moeda_origem", "TEXT");
+  garantirColuna(db, "caixa_cambio", "valor_origem", "REAL");
+  garantirColuna(db, "caixa_cambio", "moeda_destino", "TEXT");
+  garantirColuna(db, "caixa_cambio", "valor_destino", "REAL");
+  garantirColuna(db, "caixa_fisico", "cambio_id", "INTEGER");
   db.run("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('schema_versao', '12')");
 }
 

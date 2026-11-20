@@ -219,7 +219,7 @@ ipcMain.handle("cf-atualizar", async (_evt, url) => {
   if (typeof url !== "string") throw new Error("URL ausente.");
   const dest = path.join(app.getPath("temp"), "ControleFinanceiro-Setup.exe");
   await baixarArquivo(url, dest);
-  const instalador = spawn(dest, ["/S"], { detached: true, stdio: "ignore" });
+  const instalador = spawn(dest, ["/S"], { detached: true, stdio: "ignore", windowsHide: true });
   instalador.unref();
   setTimeout(() => app.quit(), 500);
   return true;

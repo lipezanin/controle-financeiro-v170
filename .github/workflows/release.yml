@@ -39,18 +39,25 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           VERSAO="${TAG#v}"
-          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/ControleFinanceiro-Setup.exe"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          cp -f "artifacts/ControleFinanceiro-Setup-${VERSAO}.exe" artifacts/ControleFinanceiro-Setup.exe
           python3 - <<PY
           import json, pathlib
-          pathlib.Path("artifacts").mkdir(exist_ok=True)
-          pathlib.Path("artifacts/latest.json").write_text(json.dumps({
-            "version": "${VERSAO}",
-            "url": "${URL}",
-            "notes": "Instalador Windows ${VERSAO}",
-            "name": "ControleFinanceiro-Setup.exe",
-          }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          p = pathlib.Path("artifacts/latest.json")
+          data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+          data["version"] = "${VERSAO}"
+          data["url"] = "${BASE}/ControleFinanceiro-Setup.exe"
+          data["name"] = "ControleFinanceiro-Setup.exe"
+          data.setdefault("notes", "Instalador Windows ${VERSAO}")
+          delta = data.get("delta") or None
+          if isinstance(delta, dict) and delta.get("url"):
+              nome = str(delta["url"]).rstrip("/").split("/")[-1]
+              delta["url"] = "${BASE}/" + nome
+              data["delta"] = delta
+              data["notes"] = "Atualização parcial, aplicada com o app aberto."
+          p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print(p.read_text(encoding="utf-8"))
           PY
-          cp -f artifacts/ControleFinanceiro-Setup-${VERSAO}.exe artifacts/ControleFinanceiro-Setup.exe
 
       - name: Publicar na Release
         uses: softprops/action-gh-release@v2
@@ -61,3 +68,14 @@ jobs:
             artifacts/ControleFinanceiro-Setup.exe
             artifacts/latest.json
           generate_release_notes: true
+
+      - name: Publicar delta
+        if: success()
+        run: |
+          shopt -s nullglob
+          arquivos=(artifacts/ControleFinanceiro-delta-*.zip)
+          if [ ${#arquivos[@]} -gt 0 ]; then
+            gh release upload "${GITHUB_REF_NAME}" "${arquivos[@]}" --clobber
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

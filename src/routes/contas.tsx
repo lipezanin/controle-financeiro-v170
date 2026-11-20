@@ -14,6 +14,7 @@ import {
   listarContas,
   resumirContas,
   salvarConta,
+  transferirEntreContas,
   type Conta,
   type PracaConta,
   type ResumoConta,
@@ -51,6 +52,11 @@ function Visao() {
   const [status, setStatus] = useState<StatusConta | "todas">("ativa");
   const [linhas, setLinhas] = useState<ResumoConta[]>([]);
   const [erro, setErro] = useState<string | null>(null);
+  const [de, setDe] = useState(0);
+  const [para, setPara] = useState(0);
+  const [valor, setValor] = useState("");
+  const [dataTr, setDataTr] = useState(new Date().toISOString().slice(0, 10));
+  const [msg, setMsg] = useState<string | null>(null);
 
   const carregar = useCallback(() => {
     void resumirContas({ tipo, instituicao: inst, status })
@@ -96,7 +102,7 @@ function Visao() {
       <SectionTitle
         kicker="Contas"
         title="Bancos e corretoras"
-        description="O saldo usa as transações, rendimentos e despesas já lançados na instituição. Com duas contas na mesma instituição, o lançamento precisa apontar a conta."
+        description="Cada instituição vira uma conta. O caixa físico também é uma conta para transferência; a tela dele continua a mesma. Câmbio é transferência entre moedas."
       />
       {erro ? <p className="mb-4 text-sm text-loss">{erro}</p> : null}
       {alertas.length ? (
@@ -108,6 +114,52 @@ function Visao() {
           ))}
         </div>
       ) : null}
+      <form
+        className="mb-6 grid grid-cols-1 gap-3 rounded-[16px] border border-border bg-surface p-4 sm:grid-cols-2 lg:grid-cols-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setErro(null);
+          void transferirEntreContas({ data: dataTr, origemId: de, destinoId: para, valor: parseNumeroBR(valor) })
+            .then(() => {
+              setMsg("Transferência lançada nas duas contas.");
+              setValor("");
+              carregar();
+            })
+            .catch((err: unknown) => setErro(err instanceof Error ? err.message : "Falha na transferência"));
+        }}
+      >
+        <p className="sm:col-span-2 lg:col-span-5 text-sm text-muted">Transferir entre contas da mesma moeda, inclusive o caixa físico. Troca de moeda fica em Câmbio.</p>
+        <label className="text-xs text-muted">
+          Data
+          <input type="date" className={campo + " mt-1"} value={dataTr} onChange={(e) => setDataTr(e.target.value)} />
+        </label>
+        <label className="text-xs text-muted">
+          De
+          <select className={campo + " mt-1"} value={de} onChange={(e) => setDe(Number(e.target.value))}>
+            <option value={0}>Conta</option>
+            {linhas.map((c) => (
+              <option key={c.id} value={c.id}>{c.apelido} · {c.moeda}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-muted">
+          Para
+          <select className={campo + " mt-1"} value={para} onChange={(e) => setPara(Number(e.target.value))}>
+            <option value={0}>Conta</option>
+            {linhas.map((c) => (
+              <option key={c.id} value={c.id}>{c.apelido} · {c.moeda}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-muted">
+          Valor
+          <CampoValor value={valor} onChange={setValor} />
+        </label>
+        <div className="flex items-end">
+          <Button type="submit">Transferir</Button>
+        </div>
+        {msg ? <p className="sm:col-span-2 lg:col-span-5 text-sm text-gain">{msg}</p> : null}
+      </form>
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {totais.map(([k, v]) => {
           const [tp, moeda] = k.split("|");
