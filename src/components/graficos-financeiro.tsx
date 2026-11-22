@@ -586,3 +586,76 @@ export function CalendarioFluxo({
     </div>
   );
 }
+
+export function GraficoAplicadoMercado({
+  dados,
+}: {
+  dados: { rotulo: string; aplicado: number; mercado: number }[];
+}) {
+  return (
+    <div className="h-64 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={dados} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
+          <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
+          <YAxis stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} tickFormatter={eixoReais} />
+          <Tooltip content={<TooltipBranco />} />
+          <Legend />
+          <Line type="monotone" dataKey="aplicado" name="Aplicado" stroke={CORES.accent} strokeWidth={2} dot={false} />
+          <Line type="monotone" dataKey="mercado" name="Mercado" stroke={CORES.lucro} strokeWidth={2} dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function GraficoRentabilidade({
+  dados,
+  series,
+}: {
+  dados: Record<string, string | number>[];
+  series: { chave: string; nome: string; cor: string }[];
+}) {
+  return (
+    <div className="h-72 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={dados} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
+          <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
+          <YAxis
+            stroke={CORES.textoSecundario}
+            tick={{ fill: CORES.textoSecundario, fontSize: 11 }}
+            tickFormatter={(v: number) => `${(v * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`}
+          />
+          <Tooltip
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              return (
+                <div className="rounded-md bg-white px-3 py-1.5 text-xs text-slate-900 shadow">
+                  {payload.map((p) => (
+                    <p key={String(p.name)}>
+                      {p.name}: {typeof p.value === "number" ? formatPct(p.value, 2) : "—"}
+                    </p>
+                  ))}
+                </div>
+              );
+            }}
+          />
+          <Legend />
+          {series.map((s) => (
+            <Line
+              key={s.chave}
+              type="monotone"
+              dataKey={s.chave}
+              name={s.nome}
+              stroke={s.cor}
+              strokeWidth={s.chave === "media" ? 1.5 : 2}
+              strokeDasharray={s.chave === "media" ? "6 4" : undefined}
+              dot={false}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

@@ -8,7 +8,7 @@
 import type { Database } from "sql.js";
 import { consultar, executar, getDb, salvarDb, apagarComTombstone, type LinhaSql } from "@/lib/financeiro/db";
 import { buscarSerieSgs, atualizarTaxas } from "@/services/taxas-service";
-import { casarTesouro, listarPrecosTesouro, type PrecoTesouro } from "@/services/tesouro-service";
+import { casarTesouro, listarHistoricoTesouro, listarPrecosTesouro, serieTesouro, type PrecoTesouro } from "@/services/tesouro-service";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 const RF_ATIVA =
@@ -381,6 +381,7 @@ export async function atualizarRendaFixa(opts?: { pularTaxas?: boolean }): Promi
     );
     n += 1;
   }
+  await garantirHistoricoRf();
   await salvarDb();
   return { atualizados: n, fonte: nTesouro ? `BCB SGS + Tesouro (${nTesouro})` : "BCB SGS" };
 }
@@ -539,4 +540,277 @@ export async function atualizarTituloRf(
     [input.dataAplicacao, input.valorAplicado, input.ticker.trim(), input.emissor.trim() || null, id],
   );
   await salvarDb();
+}
+
+function somarDia(iso: string, dias: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+function rotuloIndexador(indexador: string): string {
+  const tipo = classificar(indexador);
+  if (tipo === "ipca") return "IPCA+";
+  if (tipo === "pre") return "Prefixado";
+  if (tipo === "cdi") return "CDI";
+  if (tipo === "selic") return "SELIC";
+  return indexador || "Outro";
+}
+
+function mapaFator(db: Database, indice: string): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of consultar(db, `SELECT data, fator FROM historico_indices WHERE indice = ?`, [indice])) {
+    const f = num(r.fator);
+    if (f) m.set(String(r.data).slice(0, 10), f);
+  }
+  return m;
+}
+
+function guardarIndice(db: Database, indice: string, pts: { iso: string; valor: number }[], unidade: string): void {
+  for (const p of pts) {
+    const fator = indice === "IPCA_MENSAL" ? p.valor / 100 : p.valor > 2 ? (1 + p.valor / 100) ** (1 / 252) - 1 : p.valor / 100;
+    executar(
+      db,
+      `INSERT OR REPLACE INTO historico_indices (indice, data, valor, fator, unidade, fonte) VALUES (?, ?, ?, ?, ?, ?)`,
+      [indice, p.iso, p.valor, fator, unidade, "BCB SGS"],
+    );
+  }
+}
+
+function datasEntre(de: string, ate: string, cdi: Map<string, number>): string[] {
+  const uteis = [...cdi.keys()].filter((d) => d >= de && d <= ate).sort();
+  if (uteis.length >= 2) return uteis[0] === de ? uteis : [de, ...uteis];
+  const out = [de];
+  let d = de;
+  while (d < ate) {
+    d = somarDia(d, 7);
+    if (d > ate) d = ate;
+    out.push(d);
+    if (out.length > 800) break;
+  }
+  return out;
+}
+
+function curvaIndexada(
+  aplicado: number,
+  taxa: number,
+  tipo: ReturnType<typeof classificar>,
+  datas: string[],
+  cdi: Map<string, number>,
+  selic: Map<string, number>,
+  ipca: Map<string, number>,
+): { data: string; mercado: number }[] {
+  let fator = 1;
+  let ipcaAcum = 1;
+  let mesVisto = "";
+  const out: { data: string; mercado: number }[] = [];
+  const inicio = datas[0] ?? "";
+  for (const data of datas) {
+    if (data !== inicio) {
+      if (tipo === "cdi" || tipo === "selic") {
+        const diario = (tipo === "selic" ? selic.get(data) : cdi.get(data)) ?? cdi.get(data);
+        if (diario) fator *= 1 + diario * (taxa || 1);
+      } else if (tipo === "pre") {
+        const du = diasCorridos(inicio, data) * (252 / 365);
+        fator = (1 + (taxa || 0)) ** (du / 252);
+      } else if (tipo === "ipca") {
+        const mes = data.slice(0, 7);
+        if (mes !== mesVisto) {
+          const f = ipca.get(mesVisto) ?? ipca.get(`${mesVisto}-01`);
+          if (mesVisto && f) ipcaAcum *= 1 + f;
+          mesVisto = mes;
+        }
+        const anos = diasCorridos(inicio, data) / 365;
+        fator = ipcaAcum * (1 + (taxa || 0)) ** anos;
+      }
+    } else if (tipo === "ipca") {
+      mesVisto = data.slice(0, 7);
+    }
+    out.push({ data, mercado: aplicado * (tipo === "outro" ? 1 : fator) });
+  }
+  return out;
+}
+
+async function gravarCurvaDiaria(db: Database): Promise<void> {
+  const titulos = consultar(db, `SELECT * FROM renda_fixa WHERE ${RF_ATIVA}`);
+  const hoje = hojeIso();
+  const pendentes: LinhaSql[] = [];
+  for (const r of titulos) {
+    const id = num(campo(r, "id"));
+    const aplicado = num(campo(r, "valor_aplicado"));
+    const ultimo = consultar(
+      db,
+      `SELECT data, valor_aplicado FROM historico_renda_fixa WHERE titulo_id = ? ORDER BY data DESC LIMIT 1`,
+      [id],
+    )[0];
+    const custoMudou = ultimo && Math.abs(num(ultimo.valor_aplicado) - aplicado) > 0.05;
+    if (custoMudou) executar(db, `DELETE FROM historico_renda_fixa WHERE titulo_id = ?`, [id]);
+    if (!ultimo || custoMudou || String(ultimo.data).slice(0, 10) < hoje) pendentes.push(r);
+  }
+  if (!pendentes.length) return;
+
+  let cdi = mapaFator(db, "CDI");
+  let selic = mapaFator(db, "SELIC");
+  let ipca = mapaFator(db, "IPCA_MENSAL");
+  const datasAplic = pendentes.map((r) => str(campo(r, "data_aplicacao"))).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  const inicio = datasAplic.sort()[0] ?? "2024-01-01";
+  if (cdi.size < 5) {
+    guardarIndice(db, "CDI", await buscarSerieSgs(12, inicio, hoje).catch(() => []), "%");
+    cdi = mapaFator(db, "CDI");
+  }
+  if (selic.size < 5) {
+    guardarIndice(db, "SELIC", await buscarSerieSgs(11, inicio, hoje).catch(() => []), "%");
+    selic = mapaFator(db, "SELIC");
+  }
+  if (ipca.size < 2) {
+    guardarIndice(db, "IPCA_MENSAL", await buscarSerieSgs(433, inicio, hoje).catch(() => []), "% mês");
+    ipca = mapaFator(db, "IPCA_MENSAL");
+  }
+
+  const precisaTesouro = pendentes.some((r) => {
+    if (!ehTesouro(r)) return false;
+    const n = consultar(db, `SELECT COUNT(*) AS n FROM historico_renda_fixa WHERE titulo_id = ?`, [num(campo(r, "id"))])[0];
+    return num(n?.n) === 0;
+  });
+  let historico: PrecoTesouro[] = [];
+  if (precisaTesouro) historico = await listarHistoricoTesouro().catch(() => []);
+
+  db.run("BEGIN");
+  try {
+    for (const r of pendentes) {
+      const id = num(campo(r, "id"));
+      const aplicado = num(campo(r, "valor_aplicado"));
+      const de = str(campo(r, "data_aplicacao"));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || aplicado <= 0) continue;
+      const ate = hoje < de ? de : hoje;
+      const indexador = rotuloIndexador(str(campo(r, "indexador")));
+      const tipo = classificar(str(campo(r, "indexador")));
+      const ja = new Set(
+        consultar(db, `SELECT data FROM historico_renda_fixa WHERE titulo_id = ?`, [id]).map((x) => String(x.data).slice(0, 10)),
+      );
+      let pontos: { data: string; mercado: number; fonte: string }[] = [];
+      if (ehTesouro(r) && historico.length) {
+        const serie = serieTesouro(historico, {
+          tipoRf: str(campo(r, "tipo_rf")),
+          nome: str(campo(r, "nome")),
+          vencimento: str(campo(r, "data_vencimento")),
+        }).filter((p) => p.dataBase >= de && p.dataBase <= ate);
+        const qtdSalva = num(campo(r, "qtd_tesouro"));
+        const qtd = qtdSalva > 0 ? qtdSalva : serie[0]?.puVenda ? aplicado / serie[0].puVenda : 0;
+        pontos = serie.map((p) => ({
+          data: p.dataBase,
+          mercado: qtd > 0 ? qtd * p.puVenda : aplicado,
+          fonte: `Tesouro Transparente · PU ${p.puVenda}`,
+        }));
+      }
+      if (!pontos.length) {
+        pontos = curvaIndexada(aplicado, num(campo(r, "taxa")), tipo, datasEntre(de, ate, cdi.size ? cdi : selic), cdi, selic, ipca).map(
+          (p) => ({ ...p, fonte: tipo === "outro" ? "custo" : `indexador ${indexador}` }),
+        );
+      }
+      const mercadoHoje = num(campo(r, "valor_mercado"));
+      if (mercadoHoje > 0 && !pontos.some((p) => p.data === hoje)) {
+        pontos.push({ data: hoje, mercado: mercadoHoje, fonte: str(campo(r, "fonte_atualizacao")) || "mercado" });
+      }
+      for (const p of pontos) {
+        if (ja.has(p.data)) continue;
+        db.run(
+          `INSERT OR REPLACE INTO historico_renda_fixa
+             (titulo_id, data, valor_aplicado, valor_mercado, rentabilidade, indexador, fonte)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [id, p.data, aplicado, p.mercado, aplicado ? (p.mercado - aplicado) / aplicado : null, indexador, p.fonte],
+        );
+      }
+    }
+    db.run("COMMIT");
+  } catch (erro) {
+    db.run("ROLLBACK");
+    throw erro;
+  }
+}
+
+let curvaEmCurso: Promise<void> | null = null;
+
+export async function garantirHistoricoRf(): Promise<void> {
+  if (curvaEmCurso) return curvaEmCurso;
+  curvaEmCurso = (async () => {
+    const db = await getDb();
+    await gravarCurvaDiaria(db);
+    await salvarDb();
+  })().finally(() => {
+    curvaEmCurso = null;
+  });
+  return curvaEmCurso;
+}
+
+export type PontoCurvaRf = { data: string; aplicado: number; mercado: number; rentabilidade: number | null };
+
+export async function curvaTituloRf(id: number): Promise<{ titulo: TituloRf | null; pontos: PontoCurvaRf[] }> {
+  await garantirHistoricoRf();
+  const db = await getDb();
+  const row = consultar(db, `SELECT * FROM renda_fixa WHERE id = ?`, [id])[0];
+  const pontos = consultar(
+    db,
+    `SELECT data, valor_aplicado, valor_mercado, rentabilidade FROM historico_renda_fixa WHERE titulo_id = ? ORDER BY data`,
+    [id],
+  ).map((r) => ({
+    data: String(r.data).slice(0, 10),
+    aplicado: num(r.valor_aplicado),
+    mercado: num(r.valor_mercado),
+    rentabilidade: r.rentabilidade == null ? null : num(r.rentabilidade),
+  }));
+  return { titulo: row ? linha(row) : null, pontos };
+}
+
+export type PontoPainelRf = { mes: string; rotulo: string; aplicado: number; mercado: number; rentabilidade: number | null };
+export type PainelRf = {
+  carteira: PontoPainelRf[];
+  classes: { classe: string; pontos: { mes: string; rotulo: string; rentabilidade: number }[] }[];
+};
+
+export async function painelRendaFixa(internacional: boolean | null): Promise<PainelRf> {
+  await garantirHistoricoRf();
+  const db = await getDb();
+  const linhas = consultar(
+    db,
+    `SELECT h.data, h.titulo_id, h.valor_aplicado, h.valor_mercado, h.indexador, r.origem
+     FROM historico_renda_fixa h JOIN renda_fixa r ON r.id = h.titulo_id ORDER BY h.data`,
+  );
+  const porMes = new Map<string, Map<number, { aplicado: number; mercado: number; indexador: string }>>();
+  for (const r of linhas) {
+    const intl = String(r.origem ?? "").toLowerCase().includes("internacional");
+    if (internacional === true && !intl) continue;
+    if (internacional === false && intl) continue;
+    const mes = String(r.data).slice(0, 7);
+    const doMes = porMes.get(mes) ?? new Map();
+    doMes.set(num(r.titulo_id), {
+      aplicado: num(r.valor_aplicado),
+      mercado: num(r.valor_mercado),
+      indexador: str(r.indexador) || "Outro",
+    });
+    porMes.set(mes, doMes);
+  }
+  const carteira: PontoPainelRf[] = [];
+  const classes = new Map<string, { mes: string; rotulo: string; rentabilidade: number }[]>();
+  for (const mes of [...porMes.keys()].sort()) {
+    const itens = [...(porMes.get(mes)?.values() ?? [])];
+    const aplicado = itens.reduce((s, i) => s + i.aplicado, 0);
+    const mercado = itens.reduce((s, i) => s + i.mercado, 0);
+    const [yy, mm] = mes.split("-");
+    const rotulo = `${mm}/${yy.slice(2)}`;
+    carteira.push({ rotulo, mes, aplicado, mercado, rentabilidade: aplicado ? (mercado - aplicado) / aplicado : null });
+    const porClasse = new Map<string, { aplicado: number; mercado: number }>();
+    for (const i of itens) {
+      const atual = porClasse.get(i.indexador) ?? { aplicado: 0, mercado: 0 };
+      atual.aplicado += i.aplicado;
+      atual.mercado += i.mercado;
+      porClasse.set(i.indexador, atual);
+    }
+    for (const [classe, v] of porClasse) {
+      const lista = classes.get(classe) ?? [];
+      lista.push({ rotulo, mes, rentabilidade: v.aplicado ? (v.mercado - v.aplicado) / v.aplicado : 0 });
+      classes.set(classe, lista);
+    }
+  }
+  return { carteira, classes: [...classes.entries()].map(([classe, pontos]) => ({ classe, pontos })) };
 }

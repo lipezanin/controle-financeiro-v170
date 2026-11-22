@@ -59,6 +59,62 @@ export async function listarPrecosTesouro(): Promise<PrecoTesouro[]> {
   return parsearCsv(texto);
 }
 
+/** CSV inteiro: um ponto por título e por dia de fechamento. */
+export function parsearCsvCompleto(texto: string): PrecoTesouro[] {
+  const linhas = texto.split(/\r?\n/).filter((l) => l.includes(";"));
+  const out: PrecoTesouro[] = [];
+  for (const ln of linhas) {
+    if (ln.toLowerCase().startsWith("tipo")) continue;
+    const p = ln.split(";");
+    if (p.length < 7) continue;
+    const dataBase = isoDeBr(p[2] ?? "");
+    const vencimento = isoDeBr(p[1] ?? "");
+    if (!dataBase || !vencimento) continue;
+    out.push({
+      tipo: (p[0] ?? "").trim(),
+      vencimento,
+      dataBase,
+      taxaCompra: numBr(p[3] ?? ""),
+      taxaVenda: numBr(p[4] ?? ""),
+      puCompra: numBr(p[5] ?? ""),
+      puVenda: numBr(p[6] ?? ""),
+      puBase: numBr(p[7] ?? p[6] ?? ""),
+    });
+  }
+  return out;
+}
+
+export async function listarHistoricoTesouro(): Promise<PrecoTesouro[]> {
+  const r = await fetch("/proxy/tesouro-historico", { cache: "no-store" });
+  if (!r.ok) throw new Error(`Tesouro histórico HTTP ${r.status}`);
+  const buf = await r.arrayBuffer();
+  return parsearCsvCompleto(new TextDecoder("latin1").decode(buf));
+}
+
+export function serieTesouro(
+  lista: PrecoTesouro[],
+  cadastro: { tipoRf?: string | null; nome?: string | null; vencimento?: string | null },
+): PrecoTesouro[] {
+  const venc = (cadastro.vencimento ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(venc)) return [];
+  const doVenc = lista.filter((p) => p.vencimento === venc && p.puVenda > 0);
+  if (!doVenc.length) return [];
+  const tipo = cadastro.tipoRf || cadastro.nome || "";
+  let melhor = doVenc[0].tipo;
+  let pts = scoreTipo(tipo, melhor);
+  const vistos = new Set<string>();
+  for (const c of doVenc) {
+    if (vistos.has(c.tipo)) continue;
+    vistos.add(c.tipo);
+    const s = scoreTipo(tipo, c.tipo);
+    if (s > pts) {
+      pts = s;
+      melhor = c.tipo;
+    }
+  }
+  return doVenc.filter((p) => p.tipo === melhor).sort((a, b) => a.dataBase.localeCompare(b.dataBase));
+}
+
 function scoreTipo(cadastro: string, oficial: string): number {
   const a = cadastro.toUpperCase().replace(/\s+/g, " ").trim();
   const b = oficial.toUpperCase().replace(/\s+/g, " ").trim();

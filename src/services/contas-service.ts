@@ -187,17 +187,21 @@ export function garantirEcossistema(db: Awaited<ReturnType<typeof getDb>>): bool
     }
   }
   for (const tabela of ["transacoes", "rendimentos", "renda_fixa"]) {
-    executar(
-      db,
-      `UPDATE ${tabela} SET conta_id = (
-         SELECT c.id FROM contas c
-         WHERE c.instituicao = ${tabela}.instituicao
-           AND c.moeda = CASE WHEN COALESCE(${tabela}.moeda, '') IN ('', 'BRL') THEN 'BRL' ELSE ${tabela}.moeda END
-           AND c.status = 'ativa'
-         ORDER BY c.id LIMIT 1
-       )
-       WHERE TRIM(COALESCE(instituicao, '')) <> '' AND (conta_id IS NULL OR conta_id = 0)`,
-    );
+    try {
+      executar(
+        db,
+        `UPDATE ${tabela} SET conta_id = (
+           SELECT c.id FROM contas c
+           WHERE c.instituicao = ${tabela}.instituicao
+             AND c.moeda = CASE WHEN COALESCE(${tabela}.moeda, '') IN ('', 'BRL') THEN 'BRL' ELSE ${tabela}.moeda END
+             AND c.status = 'ativa'
+           ORDER BY c.id LIMIT 1
+         )
+         WHERE TRIM(COALESCE(instituicao, '')) <> '' AND (conta_id IS NULL OR conta_id = 0)`,
+      );
+    } catch {
+      /* tabela antiga sem a coluna não pode derrubar a tela de contas */
+    }
   }
   executar(
     db,

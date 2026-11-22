@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CampoValor } from "@/components/campo-valor";
 import { KpiCard } from "@/components/kpi-card";
@@ -11,9 +11,20 @@ import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { useRecorteMercado } from "@/hooks/mercado-context";
 import { passaRecorte } from "@/lib/financeiro/mercado";
 import { atualizarTituloRf, excluirTituloRf, listarRendaFixa, resgatarParcialTituloRf, resgatarTituloRf, simularResgateParcial, type ResumoRf, type TituloRf } from "@/services/renda-fixa-service";
+import { CurvaTitulo, PainelRendaFixa } from "@/components/painel-renda-fixa";
+
 import { formatNumeroBR, parseNumeroBR } from "@/utils/numeros-br";
 
+const ABAS = ["painel", "titulos", "internacional", "titulo"] as const;
+type AbaRf = (typeof ABAS)[number];
+
 export const Route = createFileRoute("/renda-fixa")({
+  validateSearch: (s: Record<string, unknown>) => {
+    const bruto = String(s.aba ?? "");
+    const aba = (ABAS.includes(bruto as AbaRf) ? bruto : "painel") as AbaRf;
+    const id = Number(s.id);
+    return { aba, id: Number.isFinite(id) ? id : 0 };
+  },
   component: Pagina,
 });
 
@@ -52,6 +63,7 @@ function campoRf(t: TituloRf, c: string): unknown {
 }
 
 function Pagina() {
+  const { aba, id } = Route.useSearch();
   const { recorte } = useRecorteMercado();
   const [r, setR] = useState<ResumoRf | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -86,10 +98,15 @@ function Pagina() {
   });
 
   const titulos = useMemo(() => {
-    const lista = (r?.titulos ?? []).filter((t) => passaRecorte(recorte, t.tipoRf, t.origem));
+    const lista = (r?.titulos ?? []).filter((t) => {
+      const intl = String(t.origem ?? "").toLowerCase().includes("internacional");
+      if (aba === "internacional") return intl;
+      if (aba === "titulos") return !intl;
+      return passaRecorte(recorte, t.tipoRf, t.origem);
+    });
     if (!campo) return lista;
     return [...lista].sort((a, b) => compararSort(campoRf(a, campo), campoRf(b, campo), dir));
-  }, [r, campo, dir, recorte]);
+  }, [r, campo, dir, recorte, aba]);
 
   function clicar(c: string) {
     if (campo === c) setDir(dir === "asc" ? "desc" : "asc");
@@ -99,12 +116,15 @@ function Pagina() {
     }
   }
 
+  if (aba === "painel") return <PainelRendaFixa internacional={false} />;
+  if (aba === "titulo" && id > 0) return <CurvaTitulo id={id} />;
+
   return (
     <div className="mx-auto max-w-6xl">
       <SectionTitle
         kicker="Módulo"
-        title="Renda fixa · CDB, LCA e Tesouro"
-        description="Mesma tabela da aba RENDA FIXA. Valor de mercado é recalculado automaticamente a cada 10 min com CDI diário (SGS 12) e IPCA (SGS 433). Clique no cabeçalho para ordenar."
+        title={aba === "internacional" ? "Renda fixa internacional" : "Títulos de renda fixa"}
+        description="Clique no título para ver a evolução desde a aplicação. O valor de mercado usa o indexador diário. Tesouro Direto usa o PU de fechamento."
       />
 
       {erro ? <p className="mb-4 text-sm text-loss">{erro}</p> : null}
@@ -168,7 +188,9 @@ function Pagina() {
             {titulos.map((t) => (
               <tr key={t.id}>
                 <td className="sticky left-0 bg-surface px-3 py-2 font-medium">
-                  {t.ticker ?? t.nome ?? "—"}
+                  <Link to="/renda-fixa" search={{ aba: "titulo", id: t.id }} className="text-accent">
+                    {t.ticker ?? t.nome ?? "—"}
+                  </Link>
                 </td>
                 <td className="px-2 py-2">{t.tipoRf ?? "—"}</td>
                 <td className="max-w-[180px] truncate px-2 py-2 text-muted">{t.emissor ?? "—"}</td>

@@ -17,12 +17,17 @@ export default async function cotacaoProxy(
   if (method !== "GET") return next();
   const path = event.url.pathname;
 
-  if (path === "/proxy/tesouro") {
+  if (path === "/proxy/tesouro" || path === "/proxy/tesouro-historico") {
     try {
+      const historico = path === "/proxy/tesouro-historico";
       const r = await fetch(TESOURO_CSV, {
-        headers: { "User-Agent": "ControleFinanceiroLocal/1.0", Range: "bytes=0-16383" },
+        headers: {
+          "User-Agent": "ControleFinanceiroLocal/1.0",
+          ...(historico ? {} : { Range: "bytes=0-16383" }),
+        },
       });
-      const buf = Buffer.from(await r.arrayBuffer()).subarray(0, 16384);
+      const cru = Buffer.from(await r.arrayBuffer());
+      const buf = historico ? cru : cru.subarray(0, 16384);
       return new Response(buf, {
         headers: { "content-type": "text/plain; charset=latin1", "cache-control": "no-store" },
       });

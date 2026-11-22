@@ -87,8 +87,9 @@ const NAV: {
     icon: Percent,
     to: "/renda-fixa",
     filhos: [
-      { label: "Títulos", to: "/renda-fixa" },
-      { label: "Renda fixa internacional", to: "/lancamentos", search: { tipo: "rf_int" } },
+      { label: "Painel", to: "/renda-fixa", search: { aba: "painel" } },
+      { label: "Títulos", to: "/renda-fixa", search: { aba: "titulos" } },
+      { label: "Títulos internacionais", to: "/renda-fixa", search: { aba: "internacional" } },
     ],
   },
   {

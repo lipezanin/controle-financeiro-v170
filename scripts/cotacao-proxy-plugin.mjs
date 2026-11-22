@@ -62,15 +62,17 @@ export function cotacaoProxyPlugin() {
           }
           return;
         }
-        if (pathOnly === "/proxy/tesouro") {
+        if (pathOnly === "/proxy/tesouro" || pathOnly === "/proxy/tesouro-historico") {
           try {
+            const historico = pathOnly === "/proxy/tesouro-historico";
             const r = await fetch(TESOURO_CSV, {
               headers: {
                 "User-Agent": "ControleFinanceiroLocal/1.0",
-                Range: "bytes=0-16383",
+                ...(historico ? {} : { Range: "bytes=0-16383" }),
               },
             });
-            const buf = Buffer.from(await r.arrayBuffer()).subarray(0, 16384);
+            const cru = Buffer.from(await r.arrayBuffer());
+            const buf = historico ? cru : cru.subarray(0, 16384);
             res.statusCode = 200;
             res.setHeader("content-type", "text/plain; charset=latin1");
             res.setHeader("cache-control", "no-store");

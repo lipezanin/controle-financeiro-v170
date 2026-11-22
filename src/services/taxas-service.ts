@@ -21,9 +21,10 @@ export type Indicador = {
   atualizadoEm: string | null;
 };
 
-async function ultimoSgs(codigo: number): Promise<{ data: string; valor: number }> {
+async function ultimoSgs(codigo: number): Promise<{ data: string; valor: number } | null> {
   const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${codigo}/dados/ultimos/1?formato=json`;
-  const r = await fetch(url);
+  const r = await fetch(url, { cache: "no-store" });
+  if (r.status === 304) return null;
   if (!r.ok) throw new Error(`SGS ${codigo} HTTP ${r.status}`);
   const arr = (await r.json()) as { data: string; valor: string }[];
   if (!arr?.length) throw new Error(`SGS ${codigo} vazio`);
@@ -41,7 +42,8 @@ export async function buscarSerieSgs(
   const ini = `${a[2]}/${a[1]}/${a[0]}`;
   const fim = `${b[2]}/${b[1]}/${b[0]}`;
   const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${codigo}/dados?formato=json&dataInicial=${ini}&dataFinal=${fim}`;
-  const r = await fetch(url);
+  const r = await fetch(url, { cache: "no-store" });
+  if (r.status === 304) return [];
   if (!r.ok) throw new Error(`SGS ${codigo} HTTP ${r.status}`);
   const arr = (await r.json()) as { data: string; valor: string }[];
   return (arr ?? []).map((p) => {
@@ -55,14 +57,19 @@ export async function atualizarTaxas(): Promise<Indicador[]> {
   const agora = new Date().toISOString();
   const saida: Indicador[] = [];
   for (const s of SGS) {
-    const { valor } = await ultimoSgs(s.codigo);
-    executar(
-      db,
-      `INSERT OR REPLACE INTO indicadores (chave, valor, unidade, atualizado_em)
-       VALUES (?, ?, ?, ?)`,
-      [s.chave, valor, s.unidade, agora],
-    );
-    saida.push({ chave: s.chave, valor, unidade: s.unidade, atualizadoEm: agora });
+    try {
+      const ponto = await ultimoSgs(s.codigo);
+      if (!ponto) continue;
+      executar(
+        db,
+        `INSERT OR REPLACE INTO indicadores (chave, valor, unidade, atualizado_em)
+         VALUES (?, ?, ?, ?)`,
+        [s.chave, ponto.valor, s.unidade, agora],
+      );
+      saida.push({ chave: s.chave, valor: ponto.valor, unidade: s.unidade, atualizadoEm: agora });
+    } catch {
+      /* uma série fora do ar não apaga as outras */
+    }
   }
   await salvarDb();
   return saida;
