@@ -8,6 +8,7 @@ import { SelectCadastro } from "@/components/select-cadastro";
 import { Button } from "@/components/ui/button";
 import { useCadastros } from "@/hooks/use-cadastro";
 import { TickerCampo } from "@/components/ticker-campo";
+import { SelectConta } from "@/components/select-conta";
 import { lancarExtratoBancario } from "@/services/lancamento-service";
 
 const MAX = 20;
@@ -32,11 +33,16 @@ const vazia = (): Row => ({
   irRetido: "0",
 });
 
-export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
+export function ExtratoBancario({
+  onOk,
+}: {
+  onOk?: (info?: { texto: string; ids?: number[]; tabela?: "rendimentos" }) => void;
+}) {
   const listas = useCadastros(["instituicao", "origem", "moeda", "tipo_rendimento"]);
   const [instituicao, setInstituicao] = useState("");
   const [origem, setOrigem] = useState("Nacional");
   const [moeda, setMoeda] = useState("BRL");
+  const [contaId, setContaId] = useState(0);
   const [linhas, setLinhas] = useState<Row[]>(() => Array.from({ length: MAX }, vazia));
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -62,13 +68,13 @@ export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
     setErro(null);
     setMsg(null);
     try {
-      const n = await lancarExtratoBancario(
-        { instituicao, origem, moeda },
+      const r = await lancarExtratoBancario(
+        { instituicao, origem, moeda, contaId },
         linhas.filter((l) => l.data && l.valorBruto && l.tipoRendimento),
       );
-      setMsg(`Extrato: ${n} rendimento(s) lançado(s) de uma vez.`);
+      setMsg(r.texto);
       setLinhas(Array.from({ length: MAX }, vazia));
-      onOk?.();
+      onOk?.({ texto: r.texto, ids: r.ids, tabela: "rendimentos" });
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha no extrato");
     } finally {
@@ -82,7 +88,11 @@ export function ExtratoBancario({ onOk }: { onOk?: () => void }) {
       <p className="text-[12px] text-muted">
         Instituição e tipo de rendimento vêm da Base de Dados. Valores: 1.234,56
       </p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+        <label className="text-xs text-muted">
+          Conta em que entrou
+          <SelectConta semPadrao value={contaId} onChange={(id) => setContaId(id)} />
+        </label>
         <label className="text-xs text-muted">
           Instituição
           <SelectCadastro

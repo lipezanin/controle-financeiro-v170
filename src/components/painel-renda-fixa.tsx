@@ -81,7 +81,14 @@ export function PainelRendaFixa({ internacional }: { internacional: boolean | nu
         description="Evolução do que está aplicado, do valor de mercado e da rentabilidade por indexador. O histórico diário fica gravado no aplicativo. Os títulos estão em Títulos e Títulos internacionais."
       />
       {erro ? <p className="mb-4 text-sm text-loss">{erro}</p> : null}
-      {carregando ? <p className="mb-4 text-sm text-muted">Montando o histórico diário dos títulos…</p> : null}
+      {carregando ? (
+        <div className="mb-4">
+          <p className="mb-2 text-sm text-muted">Montando o histórico diário dos títulos…</p>
+          <div className="h-1 overflow-hidden rounded-full bg-surface-2">
+            <div className="h-full w-1/3 animate-pulse bg-accent" />
+          </div>
+        </div>
+      ) : null}
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <KpiCard label="Aplicado no período" value={formatBRL(ultimo?.aplicado)} />
         <KpiCard label="Mercado no período" value={formatBRL(ultimo?.mercado)} tom="accent" />

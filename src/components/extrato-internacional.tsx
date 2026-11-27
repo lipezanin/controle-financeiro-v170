@@ -3,6 +3,7 @@ import { CampoValor } from "@/components/campo-valor";
 import { SelectCadastro } from "@/components/select-cadastro";
 import { Button } from "@/components/ui/button";
 import { useCadastros } from "@/hooks/use-cadastro";
+import { SelectConta } from "@/components/select-conta";
 import { lancarExtratoInternacional } from "@/services/lancamento-service";
 
 const MAX = 20;
@@ -27,11 +28,16 @@ const vazia = (): Row => ({
   withholding: "",
 });
 
-export function ExtratoInternacional({ onOk }: { onOk?: () => void }) {
+export function ExtratoInternacional({
+  onOk,
+}: {
+  onOk?: (info?: { texto: string; ids?: number[]; tabela?: "rendimentos" }) => void;
+}) {
   const listas = useCadastros(["instituicao", "tipo_rendimento"]);
   const tipos = listas.tipo_rendimento ?? [];
   const [instituicao, setInstituicao] = useState("");
   const [cotacao, setCotacao] = useState("");
+  const [contaId, setContaId] = useState(0);
   const [linhas, setLinhas] = useState<Row[]>(() => Array.from({ length: MAX }, vazia));
   const [msg, setMsg] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -42,13 +48,13 @@ export function ExtratoInternacional({ onOk }: { onOk?: () => void }) {
     setErro(null);
     setMsg(null);
     try {
-      const n = await lancarExtratoInternacional(
-        { instituicao, cotacao },
+      const r = await lancarExtratoInternacional(
+        { instituicao, cotacao, contaId },
         linhas.filter((l) => l.data && l.valorUsd),
       );
-      setMsg(`${n} rendimento(s) internacionais lançados (USD × PTAX ou cotação informada).`);
+      setMsg(r.texto);
       setLinhas(Array.from({ length: MAX }, vazia));
-      onOk?.();
+      onOk?.({ texto: r.texto, ids: r.ids, tabela: "rendimentos" });
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Falha no extrato internacional");
     } finally {
@@ -63,7 +69,11 @@ export function ExtratoInternacional({ onOk }: { onOk?: () => void }) {
         Valor em USD. Se a cotação ficar em branco, usa a PTAX do dia de cada linha. Withholding vira IR
         retido em BRL. Tipo de rendimento alimenta o IRPFM.
       </p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <label className="text-xs text-muted">
+          Conta em que entrou
+          <SelectConta semPadrao value={contaId} onChange={(id) => setContaId(id)} />
+        </label>
         <label className="text-xs text-muted">
           Instituição
           <SelectCadastro sessao="instituicao" value={instituicao} onChange={setInstituicao} className={campo} />

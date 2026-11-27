@@ -9,6 +9,7 @@ import type { Database } from "sql.js";
 import { consultar, executar, getDb, salvarDb, apagarComTombstone, type LinhaSql } from "@/lib/financeiro/db";
 import { buscarSerieSgs, atualizarTaxas } from "@/services/taxas-service";
 import { casarTesouro, listarHistoricoTesouro, listarPrecosTesouro, serieTesouro, type PrecoTesouro } from "@/services/tesouro-service";
+import { computavelParaGravar } from "@/services/irpf-service";
 import { garantirImportacaoInicial } from "@/utils/import-excel";
 
 const RF_ATIVA =
@@ -406,6 +407,7 @@ export async function resgatarTituloRf(
   const lucroBruto = lucroLiquido + ir;
   const isento = num(campo(row, "isencao_ir")) === 1;
   const computavel = isento ? 0 : Math.max(0, lucroBruto);
+  const regra = computavelParaGravar(db, "Renda Fixa - Rendimento", computavel);
   executar(
     db,
     `UPDATE renda_fixa
@@ -420,18 +422,19 @@ export async function resgatarTituloRf(
       db,
       `INSERT INTO rendimentos (
           data, tipo, categoria, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
-          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao
-        ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao, classificacao_irpfm
+        ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data,
         Math.max(0, lucroBruto),
         Math.max(0, lucroBruto),
         Math.max(0, lucroLiquido),
-        computavel,
+        regra.valor,
         ir,
         ticker,
         str(campo(row, "instituicao")) || null,
         `Liquidação ${ticker ?? "renda fixa"} · líquido recebido ${valorLiquido.toFixed(2)}`,
+        regra.classificacao || null,
       ],
     );
   }
@@ -500,22 +503,24 @@ export async function resgatarParcialTituloRf(
   if (sim.rendimento > 0.004) {
     const ticker = str(campo(row, "ticker")) || str(campo(row, "nome")) || null;
     const computavel = sim.isento ? 0 : Math.max(0, sim.rendimento - sim.iof);
+    const regra = computavelParaGravar(db, "Renda Fixa - Rendimento", computavel);
     executar(
       db,
       `INSERT INTO rendimentos (
           data, tipo, categoria, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
-          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao
-        ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?)`,
+          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao, classificacao_irpfm
+        ) VALUES (?, 'Renda Fixa - Rendimento', 'Renda Fixa', 'Nacional', 'BRL', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data,
         sim.rendimento,
         sim.rendimento,
         Math.max(0, sim.rendimento - sim.iof - sim.ir),
-        computavel,
+        regra.valor,
         sim.ir,
         ticker,
         str(campo(row, "instituicao")) || null,
         `Liquidação parcial ${ticker ?? "renda fixa"} · bruto ${sim.valorBruto.toFixed(2)} · principal ${sim.principalSai.toFixed(2)} · rendimento ${sim.rendimento.toFixed(2)} · IOF ${sim.iof.toFixed(2)} · IR ${sim.ir.toFixed(2)}`,
+        regra.classificacao || null,
       ],
     );
   }

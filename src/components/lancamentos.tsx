@@ -5,6 +5,7 @@ import { ExtratoBancario } from "@/components/extrato-bancario";
 import { FormImovel } from "@/components/form-imovel";
 import { NotaCorretagem } from "@/components/nota-corretagem";
 import { SelectCadastro } from "@/components/select-cadastro";
+import { SelectConta } from "@/components/select-conta";
 import { Button } from "@/components/ui/button";
 import { useCadastros } from "@/hooks/use-cadastro";
 import { lancarMovimento } from "@/services/caixa-service";
@@ -31,7 +32,7 @@ export function LancamentosRapidos({
   onOk,
   abaFixa,
 }: {
-  onOk?: () => void;
+  onOk?: (info?: { texto: string; ids?: number[]; tabela?: "transacoes" | "despesas" | "rendimentos" | "caixa" }) => void;
   abaFixa?: AbaLancamento;
 }) {
   const listas = useCadastros([
@@ -63,12 +64,12 @@ export function LancamentosRapidos({
   const [valorTx, setValorTx] = useState("");
   const [tickerTx, setTickerTx] = useState("");
   const [catDesp, setCatDesp] = useState("Moradia");
-  const [instDesp, setInstDesp] = useState("");
   const [valorDesp, setValorDesp] = useState("");
   const [tipoRend, setTipoRend] = useState("");
-  const [instRend, setInstRend] = useState("");
   const [origemRend, setOrigemRend] = useState("Nacional");
   const [valorRend, setValorRend] = useState("");
+  const [contaDesp, setContaDesp] = useState(0);
+  const [contaRend, setContaRend] = useState(0);
 
   async function onTx(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -106,18 +107,19 @@ export function LancamentosRapidos({
     const form = e.currentTarget;
     setErro(null);
     try {
-      await lancarDespesa({
+      const r = await lancarDespesa({
         vencimento: String(fd.get("vencimento")),
         categoria: String(fd.get("categoria")),
         descricao: String(fd.get("descricao")),
         valor: valorDesp,
         pagamento: String(fd.get("pagamento") ?? ""),
         instituicao: String(fd.get("instituicao") ?? ""),
+        contaId: contaDesp,
       });
-      setMsg("Despesa lançada.");
+      setMsg(r.texto);
       setValorDesp("");
       form.reset();
-      onOk?.();
+      onOk?.({ texto: r.texto, ids: [r.id], tabela: "despesas" });
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Falha no lançamento");
     }
@@ -129,18 +131,19 @@ export function LancamentosRapidos({
     const form = e.currentTarget;
     setErro(null);
     try {
-      await lancarRendimento({
+      const r = await lancarRendimento({
         data: String(fd.get("data")),
         tipo: String(fd.get("tipo")),
         ticker: String(fd.get("ticker") ?? ""),
         valor: valorRend,
         origem: String(fd.get("origem") ?? "Nacional"),
         instituicao: String(fd.get("instituicao") ?? ""),
+        contaId: contaRend,
       });
-      setMsg("Rendimento lançado.");
+      setMsg(r.texto);
       setValorRend("");
       form.reset();
-      onOk?.();
+      onOk?.({ texto: r.texto, ids: [r.id], tabela: "rendimentos" });
     } catch (err) {
       setErro(err instanceof Error ? err.message : "Falha no lançamento");
     }
@@ -306,16 +309,8 @@ export function LancamentosRapidos({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
-            Instituição
-            <SelectCadastro
-              name="instituicao"
-              sessao="instituicao"
-              opcoes={listas.instituicao}
-              value={instDesp}
-              onChange={setInstDesp}
-              className={campoCls()}
-              permitirVazio
-            />
+            Conta de onde saiu
+            <SelectConta semPadrao value={contaDesp} onChange={(id) => setContaDesp(id)} />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
             Descrição
@@ -358,16 +353,8 @@ export function LancamentosRapidos({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
-            Instituição
-            <SelectCadastro
-              name="instituicao"
-              sessao="instituicao"
-              opcoes={listas.instituicao}
-              value={instRend}
-              onChange={setInstRend}
-              className={campoCls()}
-              permitirVazio
-            />
+            Conta em que entrou
+            <SelectConta semPadrao value={contaRend} onChange={(id) => setContaRend(id)} />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted">
             Origem

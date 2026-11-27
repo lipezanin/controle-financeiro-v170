@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { importarCotahist } from "@/services/cotacao-ativos-service";
 import { checarUpdate, onStatusUpdate, type StatusUpdate } from "@/services/update-service";
 import { importarPlanilha, importarSeed } from "@/utils/import-excel";
+import { baixarHistoricoEspecie, baixarHistoricoImoveis } from "@/services/relatorio-arquivo";
 
 export const Route = createFileRoute("/manutencao")({
   component: Pagina,
@@ -70,6 +71,36 @@ function Pagina() {
         description="Instalador, importação e cópia de segurança. O uso diário não passa por aqui."
       />
       <p className="mb-4 text-sm text-muted">{msg}</p>
+      <div className="mb-6 rounded-[10px] border border-border bg-card p-4">
+        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-accent">Históricos para relançar</p>
+        <p className="mt-1 text-sm text-muted">
+          Baixe antes de apagar ou refazer lançamentos. Espécie reúne o caixa físico e o que foi marcado como espécie, cofre ou caixa. Imóveis reúne aquisição, custos, impostos e vendas.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              void baixarHistoricoEspecie()
+                .then((n) => setMsg(`Espécie: ${n} linha(s) baixadas.`))
+                .catch((e: unknown) => setMsg(e instanceof Error ? e.message : "Falha no relatório"))
+            }
+          >
+            Baixar histórico em espécie
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() =>
+              void baixarHistoricoImoveis()
+                .then((n) => setMsg(`Imóveis: ${n} linha(s) baixadas.`))
+                .catch((e: unknown) => setMsg(e instanceof Error ? e.message : "Falha no relatório"))
+            }
+          >
+            Baixar transações de imóveis
+          </Button>
+        </div>
+      </div>
       <div className="mb-6 rounded-[10px] border border-accent/40 bg-card p-4">
         <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-accent">Instalador Windows</p>
         <p className="mt-1 text-sm text-muted">

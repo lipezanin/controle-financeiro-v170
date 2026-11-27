@@ -163,6 +163,10 @@ function Pagina() {
           <thead>
             <tr className="bg-surface-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
               <ThSort label="Ticker / nome" campo="ticker" atual={campo} dir={dir} onClick={clicar} className="sticky left-0 bg-surface-2" />
+              <ThSort label="Aplicado" campo="aplicado" atual={campo} dir={dir} onClick={clicar} align="right" />
+              <ThSort label="Mercado" campo="mercado" atual={campo} dir={dir} onClick={clicar} align="right" />
+              <ThSort label="Renta bruta" campo="renta" atual={campo} dir={dir} onClick={clicar} align="right" />
+              <ThSort label="Líquido hoje" campo="liquido" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Tipo" campo="tipo" atual={campo} dir={dir} onClick={clicar} />
               <ThSort label="Emissor" campo="emissor" atual={campo} dir={dir} onClick={clicar} />
               <ThSort label="Indexador" campo="indexador" atual={campo} dir={dir} onClick={clicar} />
@@ -171,14 +175,10 @@ function Pagina() {
               <ThSort label="Vencimento" campo="vencimento" atual={campo} dir={dir} onClick={clicar} />
               <ThSort label="Liquidez" campo="liquidez" atual={campo} dir={dir} onClick={clicar} />
               <ThSort label="Amortização" campo="amortizacao" atual={campo} dir={dir} onClick={clicar} />
-              <ThSort label="Aplicado" campo="aplicado" atual={campo} dir={dir} onClick={clicar} align="right" />
-              <ThSort label="Mercado" campo="mercado" atual={campo} dir={dir} onClick={clicar} align="right" />
-              <ThSort label="Renta bruta" campo="renta" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Dias" campo="dias" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Faltam" campo="faltam" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="IR até hoje" campo="ir" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="IOF até hoje" campo="iof" atual={campo} dir={dir} onClick={clicar} align="right" />
-              <ThSort label="Líquido hoje" campo="liquido" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Renta líq." campo="rentLiq" atual={campo} dir={dir} onClick={clicar} align="right" />
               <ThSort label="Carga trib." campo="carga" atual={campo} dir={dir} onClick={clicar} align="right" />
               <th className="px-2 py-2.5" />
@@ -192,6 +192,12 @@ function Pagina() {
                     {t.ticker ?? t.nome ?? "—"}
                   </Link>
                 </td>
+                <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(t.valorAplicado)}</td>
+                <td className="px-2 py-2 text-right font-mono tabular text-accent">{formatBRL(t.valorMercado)}</td>
+                <td className={cn("px-2 py-2 text-right font-mono tabular", (t.rentabilidade ?? 0) >= 0 ? "text-gain" : "text-loss")}>
+                  {formatPct(t.rentabilidade, 2)}
+                </td>
+                <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(t.valorLiquido)}</td>
                 <td className="px-2 py-2">{t.tipoRf ?? "—"}</td>
                 <td className="max-w-[180px] truncate px-2 py-2 text-muted">{t.emissor ?? "—"}</td>
                 <td className="px-2 py-2">{t.indexador ?? "—"}</td>
@@ -200,18 +206,6 @@ function Pagina() {
                 <td className="px-2 py-2 font-mono tabular">{formatData(t.dataVencimento)}</td>
                 <td className="px-2 py-2 text-muted">{t.liquidez ?? "—"}</td>
                 <td className="px-2 py-2">{t.amortizacao ?? "—"}</td>
-                <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(t.valorAplicado)}</td>
-                <td className="px-2 py-2 text-right font-mono tabular text-accent">
-                  {formatBRL(t.valorMercado)}
-                </td>
-                <td
-                  className={cn(
-                    "px-2 py-2 text-right font-mono tabular",
-                    (t.rentabilidade ?? 0) >= 0 ? "text-gain" : "text-loss",
-                  )}
-                >
-                  {formatPct(t.rentabilidade, 2)}
-                </td>
                 <td className="px-2 py-2 text-right font-mono tabular">{t.diasCorridos}</td>
                 <td className="px-2 py-2 text-right font-mono tabular">{t.diasFaltantes ?? "—"}</td>
                 <td className="px-2 py-2 text-right font-mono tabular">
@@ -222,7 +216,6 @@ function Pagina() {
                   {formatBRL(t.iofAteAgora)}
                   <span className="block text-[10px] text-subtle">{formatPct(t.aliquotaIof, 0)}</span>
                 </td>
-                <td className="px-2 py-2 text-right font-mono tabular">{formatBRL(t.valorLiquido)}</td>
                 <td className="px-2 py-2 text-right font-mono tabular">{formatPct(t.rentabilidadeLiquida, 2)}</td>
                 <td className="px-2 py-2 text-right font-mono tabular text-warn">{formatPct(t.cargaTributaria, 2)}</td>
                 <td className="px-2 py-2 whitespace-nowrap">

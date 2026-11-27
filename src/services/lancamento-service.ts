@@ -7,9 +7,26 @@ import { consultar, executar, getDb, salvarDb, apagarComTombstone } from "@/lib/
 import { CATEGORIA_IMOVEL, ehImovel, ehSaidaImovel } from "@/lib/financeiro/imovel";
 import { reconstruirPosicoes } from "@/utils/import-excel";
 import { parseNumeroBR } from "@/utils/numeros-br";
+import { computavelParaGravar } from "@/services/irpf-service";
 
 function num(v: unknown): number {
   return parseNumeroBR(v);
+}
+
+function ultimoId(db: Awaited<ReturnType<typeof getDb>>): number {
+  return Number(consultar(db, `SELECT last_insert_rowid() AS id`)[0]?.id) || 0;
+}
+
+function apelidoConta(db: Awaited<ReturnType<typeof getDb>>, id: number): string {
+  const nome = String(consultar(db, `SELECT apelido FROM contas WHERE id = ?`, [id])[0]?.apelido ?? "").trim();
+  return nome || "conta";
+}
+
+export function fraseMovimento(saiu: string | null, entrou: string | null): string {
+  if (saiu && entrou && saiu !== entrou) return `Saiu da conta ${saiu} e entrou na conta ${entrou}.`;
+  if (saiu) return `Saiu da conta ${saiu}.`;
+  if (entrou) return `Entrou na conta ${entrou}.`;
+  return "Lançado.";
 }
 
 export type TxInput = {
@@ -30,13 +47,52 @@ export type TxInput = {
   cotacaoPtax?: number | string;
   iofBrl?: number | string;
   spreadBrl?: number | string;
+  contaId?: number;
   _adiar?: boolean;
 };
 
-export async function lancarTransacao(input: TxInput): Promise<void> {
+function ehRendaFixa(categoria: string): boolean {
+  return /renda fixa|\bcdb\b|\blca\b|\blci\b|tesouro|\bcri\b|\bcra\b|deb[eê]nt/i.test(categoria);
+}
+
+async function lancarAplicacaoRfNacional(input: TxInput): Promise<void> {
+  const ticker = input.ticker.trim().toUpperCase();
+  const valor = Math.abs(parseNumeroBR(input.valorBrl));
+  const taxas = Math.abs(parseNumeroBR(input.taxas ?? 0));
+  if (!input.data || !ticker || !valor) throw new Error("Informe data, nome do título e valor.");
+  if (!input.contaId) throw new Error("Escolha a conta de onde saiu o dinheiro.");
+  const db = await getDb();
+  executar(
+    db,
+    `INSERT INTO renda_fixa (
+        nome, ticker, tipo_movimento, tipo_rf, emissor, instituicao, indexador, taxa,
+        data_aplicacao, valor_aplicado, liquidez, status, moeda, origem, conta_id
+      ) VALUES (?, ?, 'Aplicação', ?, ?, ?, ?, ?, ?, ?, ?, 'Ativo', 'BRL', 'Nacional', ?)`,
+    [
+      ticker,
+      ticker,
+      input.categoria,
+      null,
+      input.instituicao?.trim() || null,
+      null,
+      null,
+      input.data,
+      valor + taxas,
+      input.liquidez?.trim() || "No Vencimento",
+      input.contaId || null,
+    ],
+  );
+  if (!input._adiar) await salvarDb();
+}
+
+export async function lancarTransacao(input: TxInput): Promise<number> {
   const db = await getDb();
   const ticker = input.ticker.trim().toUpperCase();
   const imovel = ehImovel(input.categoria);
+  if (!imovel && ehRendaFixa(input.categoria)) {
+    await lancarAplicacaoRfNacional(input);
+    return 0;
+  }
   const tipo = imovel && input.tipo === "Venda" ? "Venda de imóvel" : imovel && input.tipo === "Doação realizada" ? "Doação de imóvel" : input.tipo;
   const qtd = imovel ? 1 : Math.abs(parseNumeroBR(input.quantidade));
   const valor = Math.abs(parseNumeroBR(input.valorBrl));
@@ -116,8 +172,8 @@ export async function lancarTransacao(input: TxInput): Promise<void> {
         qtd_anterior, custo_ant_brl, qtd_acumulada, custo_acum_brl, preco_medio_brl, ganho_capital_brl,
         ganho_capital_orig, ganho_cambial,
         valor_usd, cotacao_efetiva, cotacao_ptax, iof_brl, spread_brl,
-        custo_acum_usd, preco_medio_usd
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        custo_acum_usd, preco_medio_usd, conta_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.data,
       tipo,
@@ -146,6 +202,7 @@ export async function lancarTransacao(input: TxInput): Promise<void> {
       spread || null,
       custoUsdNovo || null,
       pmUsd,
+      input.contaId || null,
     ],
   );
   if (imovel && saidaImovel) {
@@ -159,6 +216,7 @@ export async function lancarTransacao(input: TxInput): Promise<void> {
     reconstruirPosicoes(db);
     await salvarDb();
   }
+  return Number(consultar(db, "SELECT last_insert_rowid() AS id")[0]?.id) || 0;
 }
 
 export type OrdemNota = {
@@ -179,11 +237,13 @@ export type CabecalhoNota = {
   totalBovespa?: number | string;
   totalCorretagem?: number | string;
   taxasTotais?: number | string;
+  contaId?: number;
 };
 
 /** Nota de corretagem: N ordens + taxas rateadas, um único rebuild. */
-export async function lancarNotaCorretagem(cab: CabecalhoNota, ordens: OrdemNota[]): Promise<number> {
+export async function lancarNotaCorretagem(cab: CabecalhoNota, ordens: OrdemNota[]): Promise<{ n: number; ids: number[] }> {
   if (!cab.data) throw new Error("Informe a data da nota.");
+  if (!cab.contaId) throw new Error("Escolha a conta de onde saiu ou entrou o dinheiro.");
   let taxas = parseNumeroBR(cab.taxasTotais);
   if (taxas <= 0) {
     taxas =
@@ -203,27 +263,31 @@ export async function lancarNotaCorretagem(cab: CabecalhoNota, ordens: OrdemNota
     .filter((o) => o.ticker && o.qtd > 0 && o.valor > 0);
   if (!lista.length) throw new Error("Informe ao menos uma ordem válida (ticker, qtd e valor).");
   const soma = lista.reduce((a, o) => a + o.valor, 0);
+  const ids: number[] = [];
   for (const o of lista) {
     const taxaProp = taxas * (o.valor / soma);
-    await lancarTransacao({
-      data: cab.data,
-      tipo: o.tipo,
-      categoria: o.categoria,
-      ticker: o.ticker,
-      quantidade: o.qtd,
-      valorBrl: o.valor,
-      taxas: taxaProp,
-      nota: cab.numeroNota || undefined,
-      moeda: cab.moeda,
-      instituicao: cab.instituicao,
-      liquidez: o.liquidez,
-      _adiar: true,
-    });
+    ids.push(
+      await lancarTransacao({
+        data: cab.data,
+        tipo: o.tipo,
+        categoria: o.categoria,
+        ticker: o.ticker,
+        quantidade: o.qtd,
+        valorBrl: o.valor,
+        taxas: taxaProp,
+        nota: cab.numeroNota || undefined,
+        moeda: cab.moeda,
+        instituicao: cab.instituicao,
+        liquidez: o.liquidez,
+        contaId: cab.contaId,
+        _adiar: true,
+      }),
+    );
   }
   const db = await getDb();
   reconstruirPosicoes(db);
   await salvarDb();
-  return lista.length;
+  return { n: lista.length, ids };
 }
 
 export type CabecalhoNotaIntl = {
@@ -236,6 +300,7 @@ export type CabecalhoNotaIntl = {
   cotacaoPtax?: number | string;
   /** caixa = usa o dólar já comprado. nota = conversão informada neste lançamento. */
   fonte?: "caixa" | "nota";
+  contaId?: number;
 };
 
 export type OrdemNotaIntl = {
@@ -253,6 +318,7 @@ export async function lancarNotaInternacional(
   ordens: OrdemNotaIntl[],
 ): Promise<{ n: number; cotacaoEfetiva: number; custoTotalBrl: number }> {
   if (!cab.data) throw new Error("Informe a data da nota.");
+  if (!cab.contaId) throw new Error("Escolha a conta de onde saiu ou entrou o dinheiro.");
   const iof = parseNumeroBR(cab.iofBrl);
   const spread = parseNumeroBR(cab.spreadBrl);
   const ptax = parseNumeroBR(cab.cotacaoPtax);
@@ -318,6 +384,7 @@ export async function lancarNotaInternacional(
         liquidez: o.liquidez,
         cotacaoEfetiva: cotacao,
         cotacaoPtax: ptax,
+        contaId: cab.contaId,
         _adiar: true,
       });
     }
@@ -351,6 +418,7 @@ export async function lancarNotaInternacional(
       cotacaoPtax: ptax,
       iofBrl: iof * peso,
       spreadBrl: spread * peso,
+      contaId: cab.contaId,
       _adiar: true,
     });
   }
@@ -361,7 +429,7 @@ export async function lancarNotaInternacional(
 }
 
 export async function lancarExtratoInternacional(
-  meta: { instituicao?: string; cotacao?: number | string },
+  meta: { instituicao?: string; cotacao?: number | string; contaId?: number },
   linhas: {
     data: string;
     descricao?: string;
@@ -370,7 +438,7 @@ export async function lancarExtratoInternacional(
     ticker?: string;
     withholding?: number | string;
   }[],
-): Promise<number> {
+): Promise<{ n: number; ids: number[]; texto: string }> {
   const fxCab = parseNumeroBR(meta.cotacao);
   const lista = linhas
     .map((l) => ({
@@ -383,8 +451,10 @@ export async function lancarExtratoInternacional(
     }))
     .filter((l) => l.data && l.usd > 0 && l.tipo);
   if (!lista.length) throw new Error("Preencha ao menos uma linha com data, valor USD e tipo.");
+  if (!meta.contaId) throw new Error("Escolha a conta em que o valor entrou.");
   const db = await getDb();
   const { dolarNaData } = await import("@/services/cambio-service");
+  const ids: number[] = [];
   for (const l of lista) {
     let fx = fxCab;
     if (fx <= 0) {
@@ -396,12 +466,13 @@ export async function lancarExtratoInternacional(
     const ir = l.wh * fx;
     const liquido = Math.max(0, brutoBrl - ir);
     const usdLiquido = Math.max(0, l.usd - l.wh);
+    const regra = computavelParaGravar(db, l.tipo, brutoBrl);
     executar(
       db,
       `INSERT INTO rendimentos (
           data, tipo, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
-          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao, classificacao_irpfm, conta_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         l.data,
         l.tipo,
@@ -410,13 +481,16 @@ export async function lancarExtratoInternacional(
         l.usd,
         brutoBrl,
         liquido,
-        liquido,
+        regra.valor,
         ir,
         l.ticker,
         meta.instituicao?.trim() || null,
         l.descricao,
+        regra.classificacao || null,
+        meta.contaId,
       ],
     );
+    ids.push(ultimoId(db));
     if (usdLiquido > 0) {
       const { creditarMoeda } = await import("@/services/caixa-cambio-service");
       await creditarMoeda({
@@ -428,7 +502,7 @@ export async function lancarExtratoInternacional(
     }
   }
   await salvarDb();
-  return lista.length;
+  return { n: lista.length, ids, texto: fraseMovimento(null, apelidoConta(db, meta.contaId)) };
 }
 
 export async function lancarAplicacaoRfIntl(input: {
@@ -489,7 +563,7 @@ export async function lancarAplicacaoRfIntl(input: {
 }
 
 export async function lancarExtratoBancario(
-  meta: { instituicao?: string; origem?: string; moeda?: string },
+  meta: { instituicao?: string; origem?: string; moeda?: string; contaId?: number },
   linhas: {
     data: string;
     descricao?: string;
@@ -498,7 +572,7 @@ export async function lancarExtratoBancario(
     ticker?: string;
     irRetido?: number | string;
   }[],
-): Promise<number> {
+): Promise<{ n: number; ids: number[]; texto: string }> {
   const lista = linhas
     .map((l) => ({
       data: String(l.data || "").trim(),
@@ -510,17 +584,20 @@ export async function lancarExtratoBancario(
     }))
     .filter((l) => l.data && l.valor > 0 && l.tipo);
   if (!lista.length) throw new Error("Preencha ao menos uma linha com data, valor e tipo.");
+  if (!meta.contaId) throw new Error("Escolha a conta em que o valor entrou.");
   const db = await getDb();
   const origem = meta.origem || "Nacional";
   const moeda = meta.moeda || "BRL";
+  const ids: number[] = [];
   for (const l of lista) {
     const liquido = Math.max(0, l.valor - l.ir);
+    const regra = computavelParaGravar(db, l.tipo, l.valor);
     executar(
       db,
       `INSERT INTO rendimentos (
           data, tipo, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
-          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          valor_computavel_irpfm, ir_retido, ticker, instituicao, descricao, classificacao_irpfm, conta_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         l.data,
         l.tipo,
@@ -529,16 +606,19 @@ export async function lancarExtratoBancario(
         l.valor,
         l.valor,
         liquido,
-        liquido,
+        regra.valor,
         l.ir,
         l.ticker,
         meta.instituicao?.trim() || null,
         l.descricao ?? null,
+        regra.classificacao || null,
+        meta.contaId,
       ],
     );
+    ids.push(ultimoId(db));
   }
   await salvarDb();
-  return lista.length;
+  return { n: lista.length, ids, texto: fraseMovimento(null, apelidoConta(db, meta.contaId)) };
 }
 
 export async function lancarImovel(input: {
@@ -602,15 +682,17 @@ export async function lancarDespesa(input: {
   valor: number | string;
   pagamento?: string;
   instituicao?: string;
-}): Promise<void> {
+  contaId?: number;
+}): Promise<{ id: number; texto: string }> {
   const db = await getDb();
   const valor = Math.abs(parseNumeroBR(input.valor));
   if (!input.vencimento || !valor) throw new Error("Informe vencimento e valor.");
+  if (!input.contaId) throw new Error("Escolha a conta de onde o valor saiu.");
   const pagto = input.pagamento?.trim() || null;
   executar(
     db,
-    `INSERT INTO despesas (data_vencimento, categoria, descricao, valor, data_pagamento, situacao, instituicao)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO despesas (data_vencimento, categoria, descricao, valor, data_pagamento, situacao, instituicao, conta_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.vencimento,
       input.categoria || null,
@@ -619,9 +701,12 @@ export async function lancarDespesa(input: {
       pagto,
       pagto ? "Pago" : "Aberto",
       input.instituicao?.trim() || null,
+      input.contaId,
     ],
   );
+  const id = ultimoId(db);
   await salvarDb();
+  return { id, texto: fraseMovimento(apelidoConta(db, input.contaId), null) };
 }
 
 export async function lancarRendimento(input: {
@@ -631,16 +716,19 @@ export async function lancarRendimento(input: {
   valor: number | string;
   origem?: string;
   instituicao?: string;
-}): Promise<void> {
+  contaId?: number;
+}): Promise<{ id: number; texto: string }> {
   const db = await getDb();
   const valor = Math.abs(parseNumeroBR(input.valor));
   if (!input.data || !input.tipo || !valor) throw new Error("Informe data, tipo e valor.");
+  if (!input.contaId) throw new Error("Escolha a conta em que o valor entrou.");
+  const regra = computavelParaGravar(db, input.tipo, valor);
   executar(
     db,
     `INSERT INTO rendimentos (
         data, tipo, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
-        valor_computavel_irpfm, ir_retido, ticker, instituicao
-      ) VALUES (?, ?, ?, 'BRL', ?, ?, ?, ?, 0, ?, ?)`,
+        valor_computavel_irpfm, ir_retido, ticker, instituicao, classificacao_irpfm, conta_id
+      ) VALUES (?, ?, ?, 'BRL', ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     [
       input.data,
       input.tipo,
@@ -648,12 +736,16 @@ export async function lancarRendimento(input: {
       valor,
       valor,
       valor,
-      valor,
+      regra.valor,
       input.ticker?.trim().toUpperCase() || null,
       input.instituicao?.trim() || null,
+      regra.classificacao || null,
+      input.contaId,
     ],
   );
+  const id = ultimoId(db);
   await salvarDb();
+  return { id, texto: fraseMovimento(null, apelidoConta(db, input.contaId)) };
 }
 
 export type LinhaTransacao = {

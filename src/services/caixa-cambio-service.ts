@@ -4,6 +4,7 @@
  * pelo custo médio. Dividendo em dólar volta para cá e pode ser reinvestido.
  */
 import { consultar, executar, getDb, salvarDb } from "@/lib/financeiro/db";
+import { computavelParaGravar } from "@/services/irpf-service";
 
 export type MovimentoCambio = {
   id: number;
@@ -191,20 +192,22 @@ export async function lancarVendaMoeda(input: {
     ]);
   }
   if (Math.abs(resultado) > 0.004) {
+    const regra = computavelParaGravar(db, "Variação cambial", resultado);
     executar(
       db,
       `INSERT INTO rendimentos (
           data, tipo, categoria, origem, moeda, valor_bruto_orig, valor_bruto_brl, valor_liquido,
-          valor_computavel_irpfm, ir_retido, descricao
-        ) VALUES (?, 'Variação cambial', 'Câmbio', 'Internacional', ?, ?, ?, ?, ?, 0, ?)`,
+          valor_computavel_irpfm, ir_retido, descricao, classificacao_irpfm
+        ) VALUES (?, 'Variação cambial', 'Câmbio', 'Internacional', ?, ?, ?, ?, ?, 0, ?, ?)`,
       [
         input.data,
         moeda,
         input.quantidade,
         resultado,
         resultado,
-        resultado,
+        regra.valor,
         `Venda de ${moeda} · resultado ${resultado.toFixed(2)} sobre o custo médio`,
+        regra.classificacao || null,
       ],
     );
   }

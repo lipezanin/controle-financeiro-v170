@@ -290,8 +290,10 @@ function migrarSchema(db: Database): void {
   garantirColuna(db, "transacoes", "conta_id", "INTEGER");
   garantirColuna(db, "transacoes", "conta_destino_id", "INTEGER");
   garantirColuna(db, "rendimentos", "conta_id", "INTEGER");
+  garantirColuna(db, "rendimentos", "classificacao_irpfm", "TEXT");
   garantirColuna(db, "despesas", "conta_id", "INTEGER");
   garantirColuna(db, "renda_fixa", "conta_id", "INTEGER");
+  garantirColuna(db, "renda_fixa", "irpfm", "TEXT");
   garantirColuna(db, "caixa_cambio", "conta_origem_id", "INTEGER");
   garantirColuna(db, "caixa_cambio", "conta_destino_id", "INTEGER");
   garantirColuna(db, "caixa_cambio", "moeda_origem", "TEXT");

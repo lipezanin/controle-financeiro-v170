@@ -15,6 +15,8 @@ export type StatusSync = {
   pending: number;
   conflitos: number;
   ultimaIso: string | null;
+  passo?: number;
+  passos?: number;
 };
 
 type Meta = {
@@ -558,14 +560,18 @@ export async function sincronizarAgora(): Promise<StatusSync> {
     const device = idDispositivo();
     colunasFora.clear();
     let enviados = 0;
+    const passos = TABELAS_ESPELHO.length * 2;
+    let passo = 0;
     for (const t of TABELAS_ESPELHO) {
+      passo += 1;
       const fila = await contarPending();
-      emitir({ estado: "sincronizando", detalhe: `enviando ${t}`, ...fila });
+      emitir({ estado: "sincronizando", detalhe: `enviando ${t}`, passo, passos, ...fila });
       enviados += await enviarTabela(t, sessao.userId, device);
     }
     let puxados = 0;
     for (const t of TABELAS_ESPELHO) {
-      emitir({ estado: "sincronizando", detalhe: `lendo ${t}`, ...(await contarPending()) });
+      passo += 1;
+      emitir({ estado: "sincronizando", detalhe: `lendo ${t}`, passo, passos, ...(await contarPending()) });
       puxados += await puxarTabela(t, sessao.userId);
     }
     silenciarFlush = true;

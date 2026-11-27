@@ -25,6 +25,14 @@ jobs:
       - name: Versão da tag
         run: node scripts/carimbar-versao.mjs "${GITHUB_REF_NAME#v}"
 
+      - name: Manifest da versão anterior
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          gh release download --pattern manifest.json --dir artifacts --clobber || true
+
       - name: NSIS
         run: sudo apt-get update && sudo apt-get install -y nsis
 
@@ -67,6 +75,7 @@ jobs:
           files: |
             artifacts/ControleFinanceiro-Setup.exe
             artifacts/latest.json
+            artifacts/manifest.json
           generate_release_notes: true
 
       - name: Publicar delta

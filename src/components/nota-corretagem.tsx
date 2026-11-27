@@ -8,10 +8,12 @@ import { useEffect, useMemo, useState } from "react";
 import { CampoValor } from "@/components/campo-valor";
 import { SelectCadastro } from "@/components/select-cadastro";
 import { TickerCampo } from "@/components/ticker-campo";
+import { tickerExiste } from "@/services/ticker-catalogo-service";
 import { Button } from "@/components/ui/button";
 import { useCadastros } from "@/hooks/use-cadastro";
 import { dolarNaData } from "@/services/cambio-service";
 import { saldoCambio, type SaldoCambio } from "@/services/caixa-cambio-service";
+import { listarContas, type Conta } from "@/services/contas-service";
 import { lancarNotaCorretagem, lancarNotaInternacional } from "@/services/lancamento-service";
 import { formatNumeroBR, parseNumeroBR } from "@/utils/numeros-br";
 
@@ -89,6 +91,20 @@ export function NotaCorretagem({
   const [erro, setErro] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [geracao, setGeracao] = useState(0);
+  const [contas, setContas] = useState<Conta[]>([]);
+  const [contaId, setContaId] = useState(0);
+
+  useEffect(() => {
+    void listarContas().then((lista) => {
+      const ativas = lista.filter((c) => c.status === "ativa");
+      setContas(ativas);
+      setContaId((atual) => {
+        if (atual) return atual;
+        const moedaConta = origemInicial === "Internacional" ? "USD" : "BRL";
+        return ativas.find((c) => c.moeda === moedaConta)?.id || ativas[0]?.id || 0;
+      });
+    });
+  }, [origemInicial]);
 
   const intl = origem === "Internacional";
 
@@ -175,6 +191,16 @@ export function NotaCorretagem({
     setMsg(null);
     try {
       const preenchidas = linhas.filter((l) => l.ticker.trim());
+      const bolsa = /a[cç][oõ]es|fundos imob|etf|bdr|stocks|reits/i;
+      for (const l of preenchidas) {
+        if (!bolsa.test(l.categoria)) continue;
+        const ok = await tickerExiste(l.ticker);
+        if (!ok) {
+          throw new Error(
+            `${l.ticker.trim().toUpperCase()} não existe na consulta da bolsa. Corrija o ticker antes de lançar. Imóvel e renda fixa não passam por esta checagem.`,
+          );
+        }
+      }
       if (intl) {
         const r = await lancarNotaInternacional(
           {
@@ -186,6 +212,7 @@ export function NotaCorretagem({
             spreadBrl: spread,
             cotacaoPtax: ptax ?? undefined,
             fonte: fonteUsd,
+            contaId,
           },
           preenchidas.map((l) => ({ ...l, valorUsd: l.valorTotal })),
         );
@@ -205,6 +232,7 @@ export function NotaCorretagem({
             taxasTotais:
               parseNumeroBR(taxasTotais) ||
               parseNumeroBR(taxaLiq) + parseNumeroBR(bovespa) + parseNumeroBR(corretagem),
+            contaId,
           },
           preenchidas,
         );
@@ -227,6 +255,17 @@ export function NotaCorretagem({
         é usar o dólar que já está no câmbio. Se a compra da moeda foi nesta mesma nota, informe R$, IOF e spread.
       </p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="text-xs text-muted">
+          Conta
+          <select className={campo} value={contaId} onChange={(e) => setContaId(Number(e.target.value))} required>
+            <option value={0}>Escolha a conta</option>
+            {contas.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.apelido} · {c.moeda}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="text-xs text-muted">
           Origem
           <select

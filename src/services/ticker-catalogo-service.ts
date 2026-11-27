@@ -15,6 +15,16 @@ function categoriaDe(symbol: string, quoteType: string): string {
   return "Stocks";
 }
 
+export async function tickerExiste(simbolo: string): Promise<boolean> {
+  const s = simbolo.trim().toUpperCase();
+  if (s.length < 2) return false;
+  const hits = await buscarTickers(s);
+  return hits.some((h) => {
+    const sym = h.symbol.toUpperCase();
+    return sym === s || sym === `${s}.SA` || sym.replace(/\.SA$/, "") === s;
+  });
+}
+
 export async function buscarTickers(q: string): Promise<HitTicker[]> {
   const termo = q.trim();
   if (termo.length < 2) return [];

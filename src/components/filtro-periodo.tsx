@@ -31,6 +31,9 @@ export function FiltroPeriodo() {
 
   return (
     <div className="mb-6 flex flex-wrap items-end gap-2 rounded-[16px] border border-border bg-surface px-3 py-3">
+      <p className="w-full text-xs text-muted">
+        Este filtro muda patrimônio, investimentos, proventos, renda fixa, imóveis, financeiro, IRPF e caixa.
+      </p>
       <label className="flex flex-col gap-1 text-[11px] uppercase tracking-[0.12em] text-muted">
         Período
         <select

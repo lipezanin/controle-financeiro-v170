@@ -27,12 +27,55 @@ function eixoReais(v: number): string {
 }
 
 const tooltip = {
-  background: "#0f172a",
-  border: "1px solid #334155",
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
   borderRadius: 8,
-  color: "#ffffff",
+  color: "#0f172a",
   fontSize: 12,
 };
+
+function ZoomLinha<T extends object>({
+  data,
+  xKey,
+  altura,
+  area = false,
+  children,
+}: {
+  data: T[];
+  xKey: string;
+  altura: string;
+  area?: boolean;
+  children: ReactNode;
+}) {
+  const [foco, setFoco] = useState<number | null>(null);
+  const linhas = data as Record<string, unknown>[];
+  const visivel =
+    foco == null || linhas.length < 5
+      ? linhas
+      : linhas.slice(Math.max(0, foco - 2), Math.min(linhas.length, foco + 3));
+  const Chart = area ? AreaChart : LineChart;
+  return (
+    <div className={`${altura} relative w-full`} onMouseLeave={() => setFoco(null)}>
+      {foco != null && linhas.length >= 5 ? (
+        <span className="pointer-events-none absolute top-1 right-2 z-10 text-[10px] text-white">trecho ampliado</span>
+      ) : null}
+      <ResponsiveContainer width="100%" height="100%">
+        <Chart
+          data={visivel.length >= 2 ? visivel : linhas}
+          margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+          onMouseMove={(s) => {
+            const label = s?.activeLabel;
+            if (label == null) return;
+            const idx = linhas.findIndex((d) => String(d[xKey]) === String(label));
+            if (idx >= 0) setFoco(idx);
+          }}
+        >
+          {children}
+        </Chart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 function TooltipBranco({
   active,
@@ -140,9 +183,7 @@ export function GraficoYoc({ dados }: { dados: { data: string; yoc: number | nul
     yoc: d.yoc == null ? null : +(d.yoc * 100).toFixed(3),
   }));
   return (
-    <div className="h-56 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={serie} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={serie} xKey="data" altura="h-56">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="data" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis
@@ -152,9 +193,7 @@ export function GraficoYoc({ dados }: { dados: { data: string; yoc: number | nul
           />
           <Tooltip contentStyle={tooltip} formatter={(v: number) => `${v.toLocaleString("pt-BR")}%`} />
           <Line type="monotone" dataKey="yoc" name="YoC" stroke={CORES.lucro} strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -165,9 +204,7 @@ export function GraficoPrecoAtivo({
 }) {
   const serie = dados.map((d) => ({ data: d.data.slice(0, 10), preco: d.preco }));
   return (
-    <div className="h-56 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={serie} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={serie} xKey="data" altura="h-56">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="data" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} minTickGap={24} />
           <YAxis
@@ -181,9 +218,7 @@ export function GraficoPrecoAtivo({
             formatter={(v: number) => v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
           />
           <Line type="monotone" dataKey="preco" name="Fechamento" stroke={CORES.accent} strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -193,9 +228,7 @@ export function GraficoEvolucaoPatrimonio({
   dados: { rotulo: string; custo: number; mercado: number | null }[];
 }) {
   return (
-    <div className="h-64 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={dados} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={dados} xKey="rotulo" altura="h-64">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis
@@ -210,9 +243,7 @@ export function GraficoEvolucaoPatrimonio({
           <Legend />
           <Line type="monotone" dataKey="custo" name="Custo investido" stroke={CORES.accent} strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="mercado" name="A mercado" stroke={CORES.lucro} strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -380,9 +411,7 @@ export function GraficoCaixa({ dados }: { dados: { rotulo: string; saldo: number
   const media = dados.length ? dados.reduce((s, d) => s + d.saldo, 0) / dados.length : 0;
   const serie = dados.map((d) => ({ ...d, media }));
   return (
-    <div className="h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={serie} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={serie} xKey="rotulo" altura="h-72" area>
           <defs>
             <linearGradient id="caixaSaldo" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={CORES.accent} stopOpacity={0.45} />
@@ -400,9 +429,7 @@ export function GraficoCaixa({ dados }: { dados: { rotulo: string; saldo: number
           <Legend />
           <Area type="monotone" dataKey="saldo" name="Saldo em espécie" stroke={CORES.accent} fill="url(#caixaSaldo)" strokeWidth={2} />
           <Line type="monotone" dataKey="media" name="Média mensal" stroke={CORES.alerta} strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -418,9 +445,7 @@ export function GraficoSerieMedia({
   const media = dados.length ? dados.reduce((s, d) => s + d.valor, 0) / dados.length : 0;
   const serie = dados.map((d) => ({ ...d, media }));
   return (
-    <div className="h-64 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={serie} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={serie} xKey="rotulo" altura="h-64">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} tickFormatter={eixoReais} />
@@ -428,9 +453,7 @@ export function GraficoSerieMedia({
           <Legend />
           <Line type="monotone" dataKey="valor" name={nome} stroke={cor} strokeWidth={2} dot={{ r: 3 }} />
           <Line type="monotone" dataKey="media" name="Média mensal" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -456,9 +479,7 @@ export function GraficoCategoriasMes({
     : 0;
   const comMedia = serie.map((r) => ({ ...r, media }));
   return (
-    <div className="h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={comMedia} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={comMedia} xKey="rotulo" altura="h-72">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} tickFormatter={eixoReais} />
@@ -468,9 +489,7 @@ export function GraficoCategoriasMes({
             <Line key={c.categoria} type="monotone" dataKey={c.categoria} stroke={corClasse(i)} strokeWidth={2} dot={false} />
           ))}
           <Line type="monotone" dataKey="media" name="Média mensal" stroke="#ffffff" strokeWidth={1.5} strokeDasharray="6 4" dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -593,9 +612,7 @@ export function GraficoAplicadoMercado({
   dados: { rotulo: string; aplicado: number; mercado: number }[];
 }) {
   return (
-    <div className="h-64 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={dados} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={dados} xKey="rotulo" altura="h-64">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} tickFormatter={eixoReais} />
@@ -603,9 +620,7 @@ export function GraficoAplicadoMercado({
           <Legend />
           <Line type="monotone" dataKey="aplicado" name="Aplicado" stroke={CORES.accent} strokeWidth={2} dot={false} />
           <Line type="monotone" dataKey="mercado" name="Mercado" stroke={CORES.lucro} strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }
 
@@ -617,9 +632,7 @@ export function GraficoRentabilidade({
   series: { chave: string; nome: string; cor: string }[];
 }) {
   return (
-    <div className="h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={dados} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+      <ZoomLinha data={dados} xKey="rotulo" altura="h-72">
           <CartesianGrid stroke={CORES.borda} strokeDasharray="3 3" />
           <XAxis dataKey="rotulo" stroke={CORES.textoSecundario} tick={{ fill: CORES.textoSecundario, fontSize: 11 }} />
           <YAxis
@@ -654,8 +667,6 @@ export function GraficoRentabilidade({
               dot={false}
             />
           ))}
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ZoomLinha>
   );
 }

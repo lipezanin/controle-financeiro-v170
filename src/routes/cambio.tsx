@@ -5,6 +5,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { SectionTitle } from "@/components/section-title";
 import { Button } from "@/components/ui/button";
 import { useOrdenacao, rotuloOrdem } from "@/hooks/use-ordenacao";
+import { erroHumano } from "@/lib/financeiro/erro";
 import { formatBRL } from "@/lib/financeiro/format";
 import {
   excluirMovimentoCambio,
@@ -83,24 +84,31 @@ function Pagina() {
         onSubmit={(e) => {
           e.preventDefault();
           setErro(null);
+          if (!contaBrl || !contaUsd) {
+            setErro("Escolha a conta de reais e a conta de dólar. Sem as duas, o câmbio não entra no saldo.");
+            return;
+          }
+          const nomeBrl = contas.find((c) => c.id === contaBrl)?.apelido ?? "conta em reais";
+          const nomeUsd = contas.find((c) => c.id === contaUsd)?.apelido ?? "conta em dólar";
+          const sai = parseNumeroBR(brl) + parseNumeroBR(iof) + parseNumeroBR(spread);
           void lancarCompraMoeda({
             data,
             quantidade: parseNumeroBR(qtd),
             valorBrl: parseNumeroBR(brl),
             iofBrl: parseNumeroBR(iof),
             spreadBrl: parseNumeroBR(spread),
-            contaOrigemId: contaBrl || undefined,
-            contaDestinoId: contaUsd || undefined,
+            contaOrigemId: contaBrl,
+            contaDestinoId: contaUsd,
           })
             .then(async () => {
-              setMsg("Compra de dólar lançada no caixa de câmbio.");
+              setMsg(`Saiu ${formatBRL(sai)} de ${nomeBrl} e entrou US$ ${formatNumeroBR(parseNumeroBR(qtd), 2)} em ${nomeUsd}.`);
               setQtd("");
               setBrl("");
               setIof("");
               setSpread("");
               await carregar();
             })
-            .catch((err: unknown) => setErro(err instanceof Error ? err.message : "Falha ao comprar moeda"));
+            .catch((err: unknown) => setErro(erroHumano(err instanceof Error ? err.message : "Falha ao comprar moeda")));
         }}
       >
         <p className="sm:col-span-2 lg:col-span-6 text-sm text-muted">Comprar dólar. Sai da conta em reais e entra na conta em dólar.</p>
@@ -143,6 +151,11 @@ function Pagina() {
         <div className="flex items-end">
           <Button type="submit">Lançar compra</Button>
         </div>
+        <p className="sm:col-span-2 lg:col-span-6 text-sm text-fg">
+          {contaBrl && contaUsd && parseNumeroBR(brl) > 0
+            ? `Sai ${formatBRL(parseNumeroBR(brl) + parseNumeroBR(iof) + parseNumeroBR(spread))} de ${contas.find((c) => c.id === contaBrl)?.apelido ?? "reais"} e entra US$ ${formatNumeroBR(parseNumeroBR(qtd), 2)} em ${contas.find((c) => c.id === contaUsd)?.apelido ?? "dólar"}.`
+            : "Escolha as duas contas e o valor para ver a frase da transferência."}
+        </p>
       </form>
 
       <form

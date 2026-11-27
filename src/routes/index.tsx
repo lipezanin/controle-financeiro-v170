@@ -95,7 +95,7 @@ function Dashboard() {
       <SectionTitle
         kicker="Início"
         title="Dashboard"
-        description="Visão geral do patrimônio. Carteira, imóveis, caixa, IRPF e lançamentos estão nos menus ao lado, já abertos."
+        description="O número de cima é o patrimônio. Investimentos não incluem imóvel. O caixa físico é espécie, não bolsa."
       />
 
       <div className="mb-6">
@@ -105,22 +105,30 @@ function Dashboard() {
         />
       </div>
 
-      <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        SESSÃO 1 — Cards
-      </p>
+      <p className="mb-3 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">Patrimônio hoje</p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Patrimônio investido" value={formatBRL(r?.patrimonioInvestido)} hint="Aportes acumulados" />
+        <KpiCard
+          label="Patrimônio investido"
+          value={formatBRL(r?.patrimonioInvestido)}
+          hint="Soma do que foi aportado. Não é o valor de mercado."
+        />
         <KpiCard
           label="Resultado GC nacional"
           value={formatBRL(r?.gcNacional)}
           tom={(r?.gcNacional ?? 0) >= 0 ? "gain" : "loss"}
+          hint="Ganho ou perda já realizado em vendas nacionais."
         />
-        <KpiCard label="Aportes no ano" value={formatBRL(r?.aportesNoAno)} />
-        <KpiCard label="Resgates no ano" value={formatBRL(r?.resgatesNoAno)} tom="loss" />
-        <KpiCard label="Saldo líquido aportes" value={formatBRL(r?.saldoLiquidoAportes)} tom="accent" />
-        <KpiCard label="GC internacional" value={formatBRL(r?.gcInternacional)} />
-        <KpiCard label="Ganho cambial" value={formatBRL(r?.ganhoCambial)} />
-        <KpiCard label="Caixa físico" value={formatBRL(r?.caixaFisico)} />
+        <KpiCard label="Aportes no ano" value={formatBRL(r?.aportesNoAno)} hint="Compras no período do filtro." />
+        <KpiCard label="Resgates no ano" value={formatBRL(r?.resgatesNoAno)} tom="loss" hint="Vendas no período do filtro." />
+        <KpiCard
+          label="Saldo líquido aportes"
+          value={formatBRL(r?.saldoLiquidoAportes)}
+          tom="accent"
+          hint="Aportes menos resgates. Não é o saldo do cofre."
+        />
+        <KpiCard label="GC internacional" value={formatBRL(r?.gcInternacional)} hint="Resultado da venda no exterior, antes do câmbio." />
+        <KpiCard label="Ganho cambial" value={formatBRL(r?.ganhoCambial)} hint="Diferença entre o dólar da compra e o da venda." />
+        <KpiCard label="Caixa físico" value={formatBRL(r?.caixaFisico)} hint="Só espécie. Não entra na rentabilidade da bolsa." />
       </div>
 
       {inds.length ? (
@@ -137,14 +145,14 @@ function Dashboard() {
       ) : null}
 
       <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        Rentabilidade da carteira ativa
+        Carteira de bolsa, sem imóvel
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Custo (preço médio)" value={formatBRL(rent?.custo)} />
         <KpiCard
           label="Valor de mercado"
           value={formatBRL(rent?.mercado)}
-          hint={rent ? `${rent.comCotacao} com cotação · ${rent.semCotacao} pendentes` : undefined}
+          hint="Não inclui imóvel. O imóvel só realiza resultado na venda."
           tom="accent"
         />
         <KpiCard
@@ -184,7 +192,7 @@ function Dashboard() {
       </div>
 
       <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        SESSÃO 1.3 — Composição por classe
+        Composição da bolsa, sem imóvel
       </p>
       {r ? (
         <div className="mb-4 rounded-[16px] border border-border bg-surface p-3">
@@ -198,7 +206,7 @@ function Dashboard() {
       </div>
 
       <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        SESSÃO 1.7 — Liquidez
+        Liquidez
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {(r?.liquidez ?? []).map((l) => (
@@ -214,7 +222,7 @@ function Dashboard() {
       </div>
 
       <p className="mb-3 mt-8 text-[11px] font-medium uppercase tracking-[0.16em] text-muted">
-        SESSÃO 2 — Rendimentos mês a mês
+        Rendimentos mês a mês
       </p>
       {r ? <TabelaMensal linhas={r.rendimentosMensais} /> : null}
     </div>

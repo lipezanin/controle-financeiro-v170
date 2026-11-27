@@ -4,6 +4,7 @@ import {
   Building2,
   Banknote,
   CandlestickChart,
+  CirclePlus,
   ChevronDown,
   Home,
   Landmark,
@@ -53,11 +54,28 @@ const NAV: {
 }[] = [
   { label: "Dashboard", hint: "Visão geral", icon: LayoutDashboard, to: "/", filhos: [] },
   {
+    label: "Lançamentos",
+    hint: "Único lugar para entrar valor",
+    icon: CirclePlus,
+    to: "/lancamentos",
+    filhos: [
+      { label: "Investimento", to: "/lancamentos", search: { tipo: "nota" } },
+      { label: "Provento na corretora", to: "/lancamentos", search: { tipo: "extrato_corretora" } },
+      { label: "Crédito no banco", to: "/lancamentos", search: { tipo: "extrato" } },
+      { label: "Conta a receber", to: "/lancamentos", search: { tipo: "rend" } },
+      { label: "Conta a pagar", to: "/lancamentos", search: { tipo: "desp" } },
+      { label: "Caixa físico", to: "/lancamentos", search: { tipo: "caixa" } },
+      { label: "Conferir o caixa", to: "/lancamentos", search: { tipo: "conferencia" } },
+      { label: "Renda fixa internacional", to: "/lancamentos", search: { tipo: "rf_int" } },
+      { label: "Câmbio", to: "/cambio" },
+    ],
+  },
+  {
     label: "Patrimônio",
     hint: "Composição e liquidez",
     icon: PieChart,
     to: "/patrimonio",
-    filhos: [{ label: "Visão geral", to: "/patrimonio" }],
+    filhos: [],
   },
   {
     label: "Investimentos",
@@ -70,8 +88,6 @@ const NAV: {
       { label: "Histórico e Análise de Ativos", to: "/investimentos", search: { aba: "historico" } },
       { label: "Proventos recebidos", to: "/proventos" },
       { label: "Transações", to: "/transacoes", search: { livro: "bolsa" } },
-      { label: "Nota de corretagem", to: "/lancamentos", search: { tipo: "nota" } },
-      { label: "Extrato da corretora", to: "/lancamentos", search: { tipo: "extrato_corretora" } },
     ],
   },
   {
@@ -100,9 +116,6 @@ const NAV: {
     filhos: [
       { label: "Painel", to: "/imoveis", search: { aba: "painel" } },
       { label: "Transações", to: "/transacoes", search: { livro: "imoveis" } },
-      { label: "Aquisição / venda", to: "/imoveis", search: { aba: "aquisicao" } },
-      { label: "Imposto e corretagem", to: "/imoveis", search: { aba: "custo" } },
-      { label: "Custos de manutenção", to: "/imoveis", search: { aba: "manutencao" } },
     ],
   },
   {
@@ -121,24 +134,14 @@ const NAV: {
     hint: "Espécie e conferência",
     icon: Banknote,
     to: "/caixa",
-    filhos: [
-      { label: "Extrato", to: "/caixa" },
-      { label: "Lançar depósito ou saque", to: "/lancamentos", search: { tipo: "caixa" } },
-      { label: "Conferência", to: "/lancamentos", search: { tipo: "conferencia" } },
-    ],
+    filhos: [],
   },
   {
     label: "Financeiro",
     hint: "Fluxo e despesas",
     icon: Wallet,
     to: "/financeiro",
-    filhos: [
-      { label: "Resumo", to: "/financeiro" },
-      { label: "Extrato bancário", to: "/lancamentos", search: { tipo: "extrato" } },
-      { label: "Extrato internacional", to: "/lancamentos", search: { tipo: "extrato_int" } },
-      { label: "Conta a pagar", to: "/lancamentos", search: { tipo: "desp" } },
-      { label: "Conta a receber", to: "/lancamentos", search: { tipo: "rend" } },
-    ],
+    filhos: [],
   },
   {
     label: "Contas",
@@ -169,14 +172,10 @@ const NAV: {
     hint: "Base de dados",
     icon: Settings,
     to: "/configuracoes",
-    filhos: ["Rendimentos", "Despesas", "Gerais", "Investimentos"].flatMap((secao) => [
-      { label: secao, titulo: true },
-      ...SESSOES_CADASTRO.filter((s) => s.secao === secao).map((s) => ({
-        label: s.rotulo,
-        to: "/configuracoes",
-        search: { sessao: s.id },
-      })),
-    ]),
+    filhos: ["Rendimentos", "Despesas", "Gerais", "Investimentos"].map((secao) => {
+      const primeira = SESSOES_CADASTRO.find((s) => s.secao === secao);
+      return { label: secao, to: "/configuracoes", search: { sessao: primeira?.id ?? "tipo_rendimento" } };
+    }),
   },
 ];
 
@@ -184,11 +183,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const search = useRouterState({ select: (s) => s.location.searchStr });
   const hashAtual = useRouterState({ select: (s) => s.location.hash.replace(/^#/, "") });
-  const [abertos, setAbertos] = useState<Record<string, boolean>>(() => {
-    const o: Record<string, boolean> = {};
-    for (const g of NAV) if (g.filhos.length && g.label !== "Configurações") o[g.label] = true;
-    return o;
-  });
+  const [abertos, setAbertos] = useState<Record<string, boolean>>({});
 
   return (
     <nav className="flex flex-col gap-1" aria-label="Módulos">
@@ -268,6 +263,17 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
       })}
     </nav>
   );
+}
+
+function FiltroDaTela() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const usa =
+    pathname === "/" ||
+    ["/patrimonio", "/investimentos", "/proventos", "/renda-fixa", "/imoveis", "/financeiro", "/irpf", "/caixa"].includes(
+      pathname,
+    );
+  if (!usa) return null;
+  return <FiltroPeriodo />;
 }
 
 function Brand() {
@@ -374,7 +380,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <main className="cf-main md:pl-[280px]">
           <div className="px-4 py-6 sm:px-6 lg:px-8">
-            <FiltroPeriodo />
+            <FiltroDaTela />
             {children}
           </div>
         </main>

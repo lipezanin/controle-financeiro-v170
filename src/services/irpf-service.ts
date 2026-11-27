@@ -40,6 +40,82 @@ function str(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
+/** Compara classificação sem acento: Obrigatório, Isento, Neutro, Excluído do limite. */
+export function normFiscal(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Obrigatório e Neutro entram na base do IRPFM. Isento e Excluído do limite não entram. */
+export function entraNaBaseIrpfm(classificacao: string): boolean {
+  const n = normFiscal(classificacao);
+  return n === "obrigatorio" || n === "neutro";
+}
+
+/** Excluído do limite continua no DARF próprio. Isento não gera DARF. Sem classificação, o DARF antigo permanece. */
+export function entraNoDarf(classificacao: string): boolean {
+  const n = normFiscal(classificacao);
+  if (!n) return true;
+  if (n === "isento") return false;
+  return true;
+}
+
+export function mapaTiposIrpfm(db: Awaited<ReturnType<typeof getDb>>): Map<string, string> {
+  const mapa = new Map<string, string>();
+  for (const r of consultar(db, `SELECT nome, classificacao_irpfm FROM tipos_rendimento`)) {
+    const nome = normFiscal(str(campo(r, "nome")));
+    if (nome) mapa.set(nome, str(campo(r, "classificacao_irpfm")));
+  }
+  return mapa;
+}
+
+export function classificacaoDoTipo(mapa: Map<string, string>, tipo: string): string | null {
+  const n = normFiscal(tipo);
+  if (!n) return null;
+  const direta = mapa.get(n);
+  if (direta != null) return direta;
+  let melhor: { tam: number; c: string } | null = null;
+  for (const [nome, c] of mapa) {
+    if (nome.length < 6) continue;
+    if (n.includes(nome) || nome.includes(n)) {
+      if (!melhor || nome.length > melhor.tam) melhor = { tam: nome.length, c };
+    }
+  }
+  return melhor?.c ?? null;
+}
+
+/**
+ * Obrigatório e Neutro entram na base. Neutro já teve retenção: o valor sobe o teto e o IR retido vira crédito, sem pagar de novo.
+ * Isento e Excluído do limite ficam fora. Sem tipo cadastrado, vale a classificação da linha ou o valor já gravado.
+ */
+export function valorPelaClassificacao(
+  mapa: Map<string, string>,
+  tipo: string,
+  gravada: string,
+  armazenado: number,
+  fallback = armazenado,
+): { classificacao: string; entra: boolean; valor: number } {
+  const classificacao = classificacaoDoTipo(mapa, tipo) ?? gravada.trim();
+  if (!classificacao) return { classificacao: "", entra: Math.abs(armazenado) > 0.004, valor: armazenado };
+  if (!entraNaBaseIrpfm(classificacao)) return { classificacao, entra: false, valor: 0 };
+  const valor = Math.abs(armazenado) > 0.004 ? armazenado : fallback;
+  return { classificacao, entra: Math.abs(valor) > 0.004, valor };
+}
+
+/** Tipo Isento ou Excluído grava zero. Neutro e Obrigatório gravam o bruto: ele sobe a base e o IR retido fica só como crédito. */
+export function computavelParaGravar(
+  db: Awaited<ReturnType<typeof getDb>>,
+  tipo: string,
+  liquido: number,
+): { classificacao: string; valor: number } {
+  const c = classificacaoDoTipo(mapaTiposIrpfm(db), tipo) ?? "";
+  if (c && !entraNaBaseIrpfm(c)) return { classificacao: c, valor: 0 };
+  return { classificacao: c, valor: liquido };
+}
+
 function campo(row: LinhaSql, nome: string): unknown {
   if (row[nome] != null) return row[nome];
   const alvo = nome.toLowerCase();
@@ -189,14 +265,19 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
   const mesAtual = agora.getFullYear() === ano ? agora.getMonth() + 1 : 12;
   const mesesRestantes = Math.max(1, 12 - mesAtual + 1);
 
+  const mapaTipos = mapaTiposIrpfm(db);
   const rendimentos = consultar(
     db,
-    `SELECT data, tipo, ticker, descricao, origem, valor_computavel_irpfm, ir_retido, valor_bruto_brl FROM rendimentos`,
+    `SELECT data, tipo, ticker, descricao, origem, valor_computavel_irpfm, ir_retido, valor_bruto_brl,
+            valor_liquido, classificacao_irpfm
+     FROM rendimentos
+     WHERE deleted_at IS NULL OR TRIM(CAST(deleted_at AS TEXT)) = ''`,
   );
   const transacoes = consultar(
     db,
     `SELECT data, tipo_operacao, categoria, origem, ticker, classif_irpfm, ganho_capital_brl, valor_brl
-     FROM transacoes`,
+     FROM transacoes
+     WHERE deleted_at IS NULL OR TRIM(CAST(deleted_at AS TEXT)) = ''`,
   );
   const pagosDarf = consultar(db, `SELECT ano, mes, imposto, pago FROM darf_gc`);
 
@@ -218,24 +299,50 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
   for (const r of rendimentos) {
     const dt = parseIso(campo(r, "data"));
     if (!dt || dt.ano !== ano) continue;
-    const t = num(campo(r, "valor_computavel_irpfm"));
+    const armazenado = num(campo(r, "valor_computavel_irpfm"));
     const bruto = num(campo(r, "valor_bruto_brl"));
+    const ir = num(campo(r, "ir_retido"));
+    const fallback = bruto || num(campo(r, "valor_liquido"));
+    const regra = valorPelaClassificacao(
+      mapaTipos,
+      str(campo(r, "tipo")),
+      str(campo(r, "classificacao_irpfm")),
+      armazenado,
+      fallback,
+    );
+    let t = regra.valor;
+    const liquido = bruto - ir;
+    if (regra.entra && ir > 0.004 && bruto > t + 0.004 && Math.abs(t - liquido) < 0.06) t = bruto;
     rendimentosTotais += bruto;
-    if (str(campo(r, "tipo")) === TIPO_CONSULTORIO) dist[dt.mes] += t;
-    else demais[dt.mes] += t;
-    if (Math.abs(t) > 0.004) {
+    if (regra.entra && str(campo(r, "tipo")) === TIPO_CONSULTORIO) dist[dt.mes] += t;
+    else if (regra.entra) demais[dt.mes] += t;
+    if (regra.entra && Math.abs(t) > 0.004) {
       origens.push({
         mes: dt.mes,
         data: str(campo(r, "data")).slice(0, 10),
         origem: str(campo(r, "tipo")) === TIPO_CONSULTORIO ? "Distribuição" : "Rendimento",
         ativo: str(campo(r, "ticker")) || "—",
-        detalhe: [str(campo(r, "origem")) || "Nacional", str(campo(r, "tipo")) || str(campo(r, "descricao")) || "Rendimento"]
+        detalhe: [
+          str(campo(r, "origem")) || "Nacional",
+          str(campo(r, "tipo")) || str(campo(r, "descricao")) || "Rendimento",
+          regra.classificacao,
+          normFiscal(regra.classificacao) === "neutro" ? "entra na base; IR retido vira crédito" : "",
+        ]
           .filter(Boolean)
           .join(" · "),
         valor: t,
       });
+    } else if (!regra.entra && (Math.abs(armazenado) > 0.004 || Math.abs(fallback) > 0.004)) {
+      origens.push({
+        mes: dt.mes,
+        data: str(campo(r, "data")).slice(0, 10),
+        origem: "Fora da base",
+        ativo: str(campo(r, "ticker")) || "—",
+        detalhe: `Não entra no IRPFM · ${regra.classificacao || str(campo(r, "tipo")) || "sem classificação"}`,
+        valor: 0,
+      });
     }
-    irRetido[dt.mes] += num(campo(r, "ir_retido"));
+    if (regra.entra) irRetido[dt.mes] += num(campo(r, "ir_retido"));
   }
 
   const jaLiquidado = new Set(
@@ -245,10 +352,11 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
   );
   for (const r of consultar(
     db,
-    `SELECT data_resgate, valor_liq_recebido, valor_resgatado, valor_aplicado, ir_pago, isencao_ir,
+    `SELECT data_resgate, valor_liq_recebido, valor_resgatado, valor_aplicado, ir_pago, isencao_ir, irpfm,
             COALESCE(NULLIF(TRIM(ticker), ''), NULLIF(TRIM(nome), ''), '') AS ticker
      FROM renda_fixa
-     WHERE status = 'Resgatado' AND data_resgate IS NOT NULL AND TRIM(data_resgate) <> ''`,
+     WHERE status = 'Resgatado' AND data_resgate IS NOT NULL AND TRIM(data_resgate) <> ''
+       AND (deleted_at IS NULL OR TRIM(CAST(deleted_at AS TEXT)) = '')`,
   )) {
     const dt = parseIso(campo(r, "data_resgate"));
     if (!dt || dt.ano !== ano) continue;
@@ -256,6 +364,10 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
     const ticker = str(campo(r, "ticker")).toUpperCase();
     if (jaLiquidado.has(`${dia}|${ticker}`)) continue;
     if (num(campo(r, "isencao_ir")) === 1) continue;
+    const flag = normFiscal(str(campo(r, "irpfm")));
+    if (flag.startsWith("nao") || flag === "isento" || flag.includes("exclu")) continue;
+    const tipoRf = classificacaoDoTipo(mapaTipos, "Renda Fixa - Rendimento");
+    if (tipoRf && !entraNaBaseIrpfm(tipoRf)) continue;
     const liq = num(campo(r, "valor_liq_recebido")) || num(campo(r, "valor_resgatado"));
     const apl = num(campo(r, "valor_aplicado"));
     const ir = num(campo(r, "ir_pago"));
@@ -319,7 +431,7 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
       continue;
     }
     if (tipo === "Venda") {
-      const entra = classif === "Obrigatório";
+      const entra = entraNaBaseIrpfm(classif);
       if (entra) {
         gcObrig[dt.mes] += gc;
       }
@@ -329,18 +441,20 @@ export async function calcularMotorMensal(anoForcado?: number): Promise<ResumoIr
           data: str(campo(r, "data")).slice(0, 10),
           origem: origem === "Internacional" ? "Venda internacional" : "Venda",
           ativo: str(campo(r, "ticker")) || categoria || "—",
-          detalhe: entra ? `${origem || "Nacional"} · ${categoria || "ganho"}` : `Não entra no IRPFM · ${classif || "sem classificação"}`,
+          detalhe: entra
+            ? `${origem || "Nacional"} · ${categoria || "ganho"}${normFiscal(classif) === "neutro" ? " · entra na base; imposto já recolhido vira crédito" : ""}`
+            : normFiscal(classif).startsWith("exclu")
+              ? `Fora do teto do IRPFM · segue no DARF · ${classif}`
+              : `Não entra no IRPFM · ${classif || "sem classificação"}`,
           valor: entra ? gc : 0,
         });
       }
       if (origem === "Nacional") {
-        vendasNac[dt.mes] += valor;
-        if (classif === "Obrigatório" && categoria !== "Fundos Imobiliários") {
-          gcNac[dt.mes] += gc;
-        }
+        if (categoria !== "Fundos Imobiliários") vendasNac[dt.mes] += valor;
+        if (entraNoDarf(classif) && categoria !== "Fundos Imobiliários") gcNac[dt.mes] += gc;
       }
-      if (categoria === "Fundos Imobiliários") gcFii[dt.mes] += gc;
-      if (origem === "Internacional") gcIntl[dt.mes] += gc;
+      if (categoria === "Fundos Imobiliários" && entraNoDarf(classif)) gcFii[dt.mes] += gc;
+      if (origem === "Internacional" && entraNoDarf(classif)) gcIntl[dt.mes] += gc;
     }
   }
 

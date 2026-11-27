@@ -14,6 +14,7 @@ import { useMercadoAtualizado } from "@/hooks/use-mercado-atualizado";
 import { formatBRL, formatData } from "@/lib/financeiro/format";
 import { dataNoPeriodo } from "@/lib/financeiro/periodo";
 import { cn } from "@/lib/utils";
+import { erroHumano } from "@/lib/financeiro/erro";
 import {
   atualizarDespesa,
   atualizarRendimento,
@@ -91,14 +92,16 @@ const META: Record<TipoAba, { title: string; desc: string }> = {
   },
 };
 
+const campo = "h-10 w-full rounded-md border border-input-border bg-input px-2 text-sm text-fg";
+
+type Aviso = { texto: string; tabela?: "transacoes" | "despesas" | "rendimentos" | "caixa"; ids?: number[] };
+
 export const Route = createFileRoute("/lancamentos")({
   validateSearch: (s: Record<string, unknown>) => ({
     tipo: (TIPOS.includes(String(s.tipo) as TipoAba) ? s.tipo : "nota") as TipoAba,
   }),
   component: Pagina,
 });
-
-const campo = "h-10 w-full rounded-md border border-input-border bg-input px-2 text-sm text-fg";
 
 function Pagina() {
   const { tipo } = Route.useSearch();
@@ -112,6 +115,23 @@ function Pagina() {
   const [erro, setErro] = useState<string | null>(null);
   const [confirmar, setConfirmar] = useState("");
   const [editId, setEditId] = useState<number | null>(null);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
+
+  function publicado(info?: Aviso) {
+    void carregar();
+    if (info?.texto) setAviso(info);
+  }
+
+  async function desfazer() {
+    if (!aviso?.ids?.length || !aviso.tabela) return;
+    if (aviso.tabela === "transacoes") await excluirTransacoes(aviso.ids);
+    if (aviso.tabela === "despesas") await excluirDespesas(aviso.ids);
+    if (aviso.tabela === "rendimentos") await excluirRendimentos(aviso.ids);
+    if (aviso.tabela === "caixa") await excluirMovimentos(aviso.ids);
+    setAviso(null);
+    setMsg("Lançamento desfeito.");
+    await carregar();
+  }
 
   const carregar = useCallback(async () => {
     const [t, d, r, c] = await Promise.all([
@@ -134,7 +154,7 @@ function Pagina() {
   }, []);
 
   useEffect(() => {
-    void carregar().catch((e: unknown) => setErro(e instanceof Error ? e.message : "Falha"));
+    void carregar().catch((e: unknown) => setErro(erroHumano(e instanceof Error ? e.message : "Falha")));
   }, [carregar]);
 
   useMercadoAtualizado(() => {
@@ -187,6 +207,16 @@ function Pagina() {
   return (
     <div className="mx-auto max-w-6xl">
       <SectionTitle kicker="Lançamentos" title={meta.title} description={meta.desc} />
+      {aviso ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-border bg-surface px-3 py-2 text-sm">
+          <span>{aviso.texto}</span>
+          {aviso.ids?.length ? (
+            <Button type="button" size="sm" variant="secondary" onClick={() => void desfazer()}>
+              Desfazer
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {erro ? <p className="mb-2 text-sm text-loss">{erro}</p> : null}
       {msg ? <p className="mb-2 text-sm text-gain">{msg}</p> : null}
 
@@ -195,14 +225,14 @@ function Pagina() {
       ) : notaUnificada ? (
         <NotaCorretagem
           origemInicial={tipo === "nota_int" || tipo === "tx_int" ? "Internacional" : "Nacional"}
-          onOk={() => void carregar()}
+          onOk={publicado}
         />
       ) : tipo === "extrato_int" ? (
-        <ExtratoInternacional onOk={() => void carregar()} />
+        <ExtratoInternacional onOk={publicado} />
       ) : tipo === "rf_int" ? (
-        <FormRfInternacional onOk={() => void carregar()} />
+        <FormRfInternacional onOk={publicado} />
       ) : (
-        <LancamentosRapidos abaFixa={abaForm ?? "tx"} onOk={() => void carregar()} />
+        <LancamentosRapidos abaFixa={abaForm ?? "tx"} onOk={publicado} />
       )}
 
       {mostraDiario ? (
